@@ -6,9 +6,9 @@ CXX = g++
 PROG=NFS_Client
 
 CPPFLAGS += `pkg-config fuse3 --cflags protobuf grpc`
-CFLAGS = -Wall --std=c++0x `pkg-config fuse3 --cflags` -I..
+CFLAGS = -Wall --std=c++14 `pkg-config fuse3 --cflags` -I..
 
-CXXFLAGS += -std=c++11
+CXXFLAGS += -std=c++14
 ifeq ($(SYSTEM),Darwin)
 LDFLAGS += -L/usr/local/lib `pkg-config --libs protobuf grpc++ grpc fuse3`\
            -lgrpc++_reflection\
@@ -32,8 +32,7 @@ vpath %.proto $(PROTOS_PATH)
 
 all: system-check $(PROG) NFS_Server
 
-$(PROG): $(OBJS) NFS.pb.o NFS.grpc.pb.o
-#	$(CXX) $(OBJS) $(LDFLAGS) -o $(PROG) 
+$(PROG): NFS.pb.o NFS.grpc.pb.o $(OBJS)
 	$(CXX) $^ $(LDFLAGS) -o $@
 
 -include $(OBJS:.o=.d)

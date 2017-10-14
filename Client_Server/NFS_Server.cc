@@ -28,27 +28,84 @@
 #include "NFS.grpc.pb.h"
 #endif
 
+#include <dirent.h>
+#include <fcntl.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/stat.h>
+
 using grpc::Server;
 using grpc::ServerBuilder;
 using grpc::ServerContext;
 using grpc::Status;
-using helloworld::HelloRequest;
-using helloworld::HelloReply;
-using helloworld::Greeter;
+using NFS_DFS::NFS_Server;
+using NFS_DFS::HelloRequest;
+using NFS_DFS::HelloReply;
+using NFS_DFS::LookupMessage;
+using NFS_DFS::FileHandle;
+using NFS_DFS::Buffer;
 
+using namespace std;
+
+string root_prefix;
 // Logic and data behind the server's behavior.
-class GreeterServiceImpl final : public Greeter::Service {
-  Status SayHello(ServerContext* context, const HelloRequest* request,
-                  HelloReply* reply) override {
-    std::string prefix("Hello ");
-    reply->set_message(prefix + request->name());
+class NFS_Server_Impl final : public NFS_Server::Service {
+  Status Lookup(ServerContext* context, const LookupMessage* request,
+                  FileHandle* reply) override {
+		// cout << "Coming here " << endl;
+    reply->set_path(root_prefix + request->path());
     return Status::OK;
   }
+
+  Status Read(ServerContext* context, const HelloRequest* request,
+                  HelloReply* reply) override {
+    return Status::OK;
+  }
+
+  Status Write(ServerContext* context, const HelloRequest* request,
+                  HelloReply* reply) override {
+    return Status::OK;
+  }
+
+  Status Readdir(ServerContext* context, const LookupMessage* request,
+                  Buffer* reply) override {
+		string dir_path = root_prefix + request->path();
+		int fd = open(dir_path.c_str(), O_RDONLY);
+		DIR *dir_fd = fdopendir(fd);
+		
+		string directory_contents = "";
+		struct dirent *dp;
+		int errno;
+		do {
+			if ((dp = readdir(dir_fd)) != NULL) {
+				directory_contents = directory_contents + string(dp->d_name) + "\n";
+			}
+		}	while (dp != nullptr);
+		
+		closedir(dir_fd);
+		reply->set_size(directory_contents.size());
+		reply->set_data(directory_contents);
+    return Status::OK;
+  }
+
+  Status Getattr(ServerContext* context, const LookupMessage* request,
+				Buffer* reply) override {
+		string file_path = root_prefix + request->path();
+		struct stat st;
+		int status = 	stat(file_path.c_str(), &st);
+		reply->set_size(sizeof(st));
+		reply->set_data(string(reinterpret_cast<char*>(&st), sizeof(st)));
+		return (status == 0) ? Status::OK : Status::CANCELLED;
+	}
 };
 
-void RunServer() {
+void RunServer(char *root) {
   std::string server_address("0.0.0.0:50051");
-  GreeterServiceImpl service;
+  // NFS_Server_Impl service = NFS_Server_Impl(move(string(root)));
+  NFS_Server_Impl service;
+	
+	// Global
+	root_prefix = string(root);
 
   ServerBuilder builder;
   // Listen on the given address without any authentication mechanism.
@@ -66,7 +123,10 @@ void RunServer() {
 }
 
 int main(int argc, char** argv) {
-  RunServer();
-
+	if (argc < 2) {
+		cout << "Usage: NFS_Sserver root_directory" << endl;
+		exit(0);
+	}
+  RunServer(argv[1]);
   return 0;
 }
