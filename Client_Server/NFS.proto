@@ -23,7 +23,7 @@ package NFS_DFS;
 
 service NFS_Server{
   rpc Lookup (LookupMessage) returns (FileHandle) {}
-  rpc Read (HelloRequest) returns (HelloReply) {}
+  rpc Read (ReadRequest) returns (ReadResponse) {}
   rpc Write (HelloRequest) returns (HelloReply) {}
   rpc Readdir (LookupMessage) returns (Buffer) {}
   rpc Getattr (LookupMessage) returns (Buffer) {}
@@ -34,19 +34,31 @@ message HelloRequest {
   string name = 1;
 }
 
+message Buffer {
+	int32 size = 1;
+	bytes data = 2;
+}
+
 message LookupMessage {
 	string path = 1;
 }
 message FileHandle {
 	string path = 1;
-	int32 handle_size = 2;
-	string handle = 3;
+	int32 mount_id = 2;
+	bytes handle = 3;
 }
 
-message Buffer {
-	int32 size = 1;
-	bytes data = 2;
+message ReadRequest {
+	FileHandle fh = 1;
+	int32 offset = 2;
+	int32 size = 3;
 }
+
+message ReadResponse {
+	Buffer buff = 1;
+	int32 actual_read_bytes = 2;
+}
+
 // The response message containing the greetings
 message HelloReply {
   string message = 1;

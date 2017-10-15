@@ -47,13 +47,49 @@ using NFS_DFS::Buffer;
 
 using namespace std;
 
+typedef struct file_handle file_handle;
 string root_prefix;
 // Logic and data behind the server's behavior.
 class NFS_Server_Impl final : public NFS_Server::Service {
+
   Status Lookup(ServerContext* context, const LookupMessage* request,
                   FileHandle* reply) override {
-		// cout << "Coming here " << endl;
-    reply->set_path(root_prefix + request->path());
+		string file_path = root_prefix + request->path();
+
+		// Hopefully 16 bytes are enough for the handle, else realloc the structure.
+		int fhsize = sizeof(file_handle) + 16; 
+		file_handle *fhp = (file_handle *) malloc(fhsize);
+		int flags = 0;
+		int dirfd = AT_FDCWD;
+		fhp->handle_bytes = 0;
+		int mount_id;
+
+		// populate actual handle_bytes from kernel.
+		if (name_to_handle_at(dirfd, file_path.c_str(), fhp,
+					&mount_id, flags) != -1 || errno != EOVERFLOW) {
+				cerr << __LINE__ << " : " <<
+					"Unexpected result from name_to_handle_at()\n";
+					return Status::CANCELLED;
+		}
+	
+		if (fhp->handle_bytes > 16) {
+			fhsize = sizeof(file_handle) + fhp->handle_bytes;
+			fhp = (file_handle *) realloc(fhp, fhsize);
+		}
+
+		if (name_to_handle_at(dirfd, file_path.c_str(), fhp,
+					&mount_id, flags) == -1) {
+				cerr << __LINE__ << " : " <<
+					"Unexpected result from name_to_handle_at()\n";
+					return Status::CANCELLED;
+		}
+		
+		// Populate the file handle
+		reply->set_path(file_path);
+		reply->set_mount_id(mount_id);
+		reply->set_handle(string(reinterpret_cast<char *>(fhp), fhsize));
+
+		free(fhp);
     return Status::OK;
   }
 

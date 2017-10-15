@@ -58,7 +58,7 @@ Buffer NFS_Client::Read_Directory(string &&path) {
 
 		Status status = stub_->Readdir(&context, file_path, &reply);
 		if (!status.ok()) {
-			if (status.error_message() == 14 /* Server crashed */) {
+			if (status.error_code() == 14 /* Server crashed */) {
 				
 			}
       std::cout << status.error_code() << ": " << status.error_message()
@@ -124,7 +124,7 @@ int ClientFS::open(const char *path, struct fuse_file_info *fi)
 	// File handle not present 
 	if (fh_itr == file_handle_map_.end()) {
 		FileHandle fh = client_ptr->Lookup_File(string(path));
-		file_handle_map_[string(path)] = fh;
+		file_handle_map_[string(path)] = move(fh);
 	}
 	// If file handle already present, then all cool.
 	return 0;

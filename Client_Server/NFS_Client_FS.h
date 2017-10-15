@@ -28,8 +28,10 @@ using NFS_DFS::Buffer;
 
 using namespace std;
 
+typedef struct file_handle file_handle;
 const char *const  server_ip = "10.128.0.2:50051";
 
+// This class handles all grpc related calls.
 class NFS_Client {
  public:
   NFS_Client(std::shared_ptr<Channel> channel)
