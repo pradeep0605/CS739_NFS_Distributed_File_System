@@ -33,6 +33,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 
 using grpc::Server;
 using grpc::ServerBuilder;
@@ -44,10 +45,59 @@ using NFS_DFS::HelloReply;
 using NFS_DFS::LookupMessage;
 using NFS_DFS::FileHandle;
 using NFS_DFS::Buffer;
+using NFS_DFS::ReadRequest;
+using NFS_DFS::ReadResponse;
+using NFS_DFS::WriteRequest;
+using NFS_DFS::WriteResponse;
+using NFS_DFS::FileCreateRequest;
+using NFS_DFS::Integer;
 
 using namespace std;
 
 typedef struct file_handle file_handle;
+
+static int open_mount_path_by_id(int mount_id) {
+	char *linep;
+	size_t lsize;
+	char mount_path[PATH_MAX];
+	int mi_mount_id, found;
+	ssize_t nread;
+	FILE *fp;
+
+	fp = fopen("/proc/self/mountinfo", "r");
+	if (fp == NULL)
+		exit(1);
+
+	found = 0;
+	linep = NULL;
+	while (!found) {
+		nread = getline(&linep, &lsize, fp);
+		if (nread == -1)
+			break;
+
+		nread = sscanf(linep, "%d %*d %*s %*s %s",
+				&mi_mount_id, mount_path);
+		if (nread != 2) {
+			fprintf(stderr, "Bad sscanf()\n");
+			exit(EXIT_FAILURE);
+		}
+
+		if (mi_mount_id == mount_id)
+			found = 1;
+	}
+	free(linep);
+
+	fclose(fp);
+
+	if (!found) {
+		fprintf(stderr, "Could not find mount point\n");
+		exit(EXIT_FAILURE);
+	}
+
+	return open(mount_path, O_RDONLY);
+}
+
+
 string root_prefix;
 // Logic and data behind the server's behavior.
 class NFS_Server_Impl final : public NFS_Server::Service {
@@ -93,13 +143,26 @@ class NFS_Server_Impl final : public NFS_Server::Service {
     return Status::OK;
   }
 
-  Status Read(ServerContext* context, const HelloRequest* request,
-                  HelloReply* reply) override {
+  Status Read(ServerContext* context, const ReadRequest* request,
+                  ReadResponse* reply) override {
     return Status::OK;
   }
 
-  Status Write(ServerContext* context, const HelloRequest* request,
-                  HelloReply* reply) override {
+  Status Write(ServerContext* context, const WriteRequest* request,
+                  WriteResponse* reply) override {
+
+		FileHandle fh = request->fh();
+		const file_handle *fhp = reinterpret_cast<const file_handle *>
+					(fh.handle().c_str());
+		FileOpenMap::iterator file_itr = file_open_map_.find(fh.path());
+		int mount_id = fh.mount_id();
+		
+		int fd;
+		if (file_itr == file_open_map_.end()) {
+			int mount_fd = open_mount_path_by_id(mount_id);
+			fd = open_by_handle_at(mount_fd, (file_handle *) fhp, O_WRONLY);
+		}
+
     return Status::OK;
   }
 
@@ -133,6 +196,21 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 		reply->set_data(string(reinterpret_cast<char*>(&st), sizeof(st)));
 		return (status == 0) ? Status::OK : Status::CANCELLED;
 	}
+
+	Status CreateFile(ServerContext* context, const FileCreateRequest *request,
+		Integer *reply) override {
+		mode_t mode = static_cast<mode_t>(request->mode());
+		string file_path = root_prefix + request->path();
+		int fd = creat(file_path.c_str(), mode);
+		reply->set_data(fd);
+		cout << "File " << request->path() << " Created" << endl;
+		close(fd);
+		return Status::OK;
+	}
+
+	private:
+	typedef unordered_map<string, int> FileOpenMap;
+	FileOpenMap file_open_map_; // keeps trak of files open for writing.
 };
 
 void RunServer(char *root) {
