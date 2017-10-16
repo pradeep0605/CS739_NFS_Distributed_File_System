@@ -28,6 +28,7 @@ FileHandle NFS_Client::Lookup_File(string&& path) {
     // The actual RPC.
     Status status = stub_->Lookup(&context, file_path, &reply);
 
+		cout << "========= inside lookup ==============" << endl;
     // Act upon its status.
     if (status.ok()) {
 			cout << "File " << reply.path() << " opened." << endl << std::flush;
@@ -65,6 +66,36 @@ Buffer NFS_Client::Read_Directory(string &&path) {
                 << std::endl << std::flush;
 		}
 		return move(reply);
+}
+
+ReadResponse NFS_Client::Read_File(FileHandle &fh, off_t offset, size_t size) {
+	ReadRequest read_req;
+	// Populate read request with given values
+	read_req.mutable_fh()->set_path(fh.path());
+	read_req.mutable_fh()->set_mount_id(fh.mount_id());
+	const file_handle *fhp = reinterpret_cast<const file_handle *>
+		(fh.handle().c_str());
+	read_req.mutable_fh()->set_handle(string((const char*)fhp, 
+		fhp->handle_bytes +	8));
+	read_req.set_offset(offset);
+	read_req.set_size(size);
+
+	ReadResponse resp;
+	ClientContext context;
+
+	cout << "File Handle Bytes : " << fhp->handle_bytes  << endl << std::flush;
+	for (unsigned int i = 0; i < fhp->handle_bytes; i++) {
+		cout << std::hex << (int) fhp->f_handle[i] << " ";
+	}
+	cout << std::flush;
+
+	Status status = stub_->Read(&context, read_req, &resp);
+	/*if (!status.ok()) {
+      std::cout << status.error_code() << ": " << status.error_message()
+                << std::endl << std::flush;
+		
+	}*/
+	return move(resp);
 }
 
 Buffer NFS_Client::Get_File_Attributes(string &&path) {
@@ -124,7 +155,25 @@ int ClientFS::open(const char *path, struct fuse_file_info *fi)
 	// File handle not present 
 	if (fh_itr == file_handle_map_.end()) {
 		FileHandle fh = client_ptr->Lookup_File(string(path));
+		
+		file_handle *fhp = reinterpret_cast<file_handle *>
+			((char *)fh.handle().c_str());
+		cout << "FH in Lookup before Map " << endl;
+		for (unsigned int i = 0; i < fhp->handle_bytes; i++) { 
+			cout << std::hex << (int) fhp->f_handle[i] << " ";
+		}
+		cout << endl;
+	
 		file_handle_map_[string(path)] = move(fh);
+
+		file_handle *fhp1 = reinterpret_cast<file_handle *>
+			((char *)file_handle_map_[string(path)].handle().c_str());
+		
+		cout << "FH in Lookup after Map " << endl;
+		for (unsigned int i = 0; i < fhp1->handle_bytes; i++) { 
+			cout << std::hex << (int) fhp1->f_handle[i] << " ";
+		}
+		cout << endl;
 	}
 	// If file handle already present, then all cool.
 	return 0;
@@ -134,19 +183,29 @@ int ClientFS::open(const char *path, struct fuse_file_info *fi)
 int ClientFS::read(const char *path, char *buf, size_t size, off_t offset,
 		              struct fuse_file_info *fi)
 {
-	size_t len;
-	(void) fi;
 	cout << "read request for file = " << path << endl << std::flush;
+	
+	int actual_read;
+	// Get the file handle for the given path
+	FileHandleMap::iterator fh_itr = file_handle_map_.find(string(path));
 
-	if(strcmp(path, hello_path) != 0)
-		return -ENOENT;
+	// File Handle not present
+	if (fh_itr == file_handle_map_.end()) {
+		cout << "No file handle present for " << path;
+		return -1;
+	}
 
-	len = strlen(hello_str);
-	if ((size_t)offset < len) {
-		if (offset + size > len)
-			size = len - offset;
-		memcpy(buf, hello_str + offset, size);
-	} else
-		size = 0;
+	// if ((size_t)offset < len) {
+		// if (offset + size > len)
+			// size = len - offset;
+		// Send Read request to Server and get the response
+		ReadResponse rd_resp = client_ptr->Read_File(fh_itr->second, offset, size);
+		// Copy the response to the bufferr
+		actual_read = rd_resp.actual_read_bytes();
+		memcpy(buf, rd_resp.buff().data().c_str(), actual_read);
+		size = actual_read;
+	//} else
+	//	size = 0;
+	
 	return size;
 }

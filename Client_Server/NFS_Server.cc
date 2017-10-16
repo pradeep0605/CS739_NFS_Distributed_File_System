@@ -34,6 +34,8 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
+#include <errno.h> 
+
 using grpc::Server;
 using grpc::ServerBuilder;
 using grpc::ServerContext;
@@ -43,12 +45,61 @@ using NFS_DFS::HelloRequest;
 using NFS_DFS::HelloReply;
 using NFS_DFS::LookupMessage;
 using NFS_DFS::FileHandle;
+using NFS_DFS::ReadRequest;
+using NFS_DFS::ReadResponse;
 using NFS_DFS::Buffer;
 
 using namespace std;
 
 typedef struct file_handle file_handle;
 string root_prefix;
+
+#define errExit(msg)    do { perror(msg); exit(EXIT_FAILURE); \
+} while (0)
+
+	static int
+open_mount_path_by_id(int mount_id)
+{
+	char *linep;
+	size_t lsize;
+	char mount_path[PATH_MAX];
+	int mi_mount_id, found;
+	ssize_t nread;
+	FILE *fp;
+
+	fp = fopen("/proc/self/mountinfo", "r");
+	if (fp == NULL)
+		errExit("fopen");
+
+	found = 0;
+	linep = NULL;
+	while (!found) {
+		nread = getline(&linep, &lsize, fp);
+		if (nread == -1)
+			break;
+
+		nread = sscanf(linep, "%d %*d %*s %*s %s",
+				&mi_mount_id, mount_path);
+		if (nread != 2) {
+			fprintf(stderr, "Bad sscanf()\n");
+			exit(EXIT_FAILURE);
+		}
+
+		if (mi_mount_id == mount_id)
+			found = 1;
+	}
+	free(linep);
+
+	fclose(fp);
+
+	if (!found) {
+		fprintf(stderr, "Could not find mount point\n");
+		exit(EXIT_FAILURE);
+	}
+
+	return open(mount_path, O_RDONLY);
+}
+
 // Logic and data behind the server's behavior.
 class NFS_Server_Impl final : public NFS_Server::Service {
 
@@ -93,10 +144,63 @@ class NFS_Server_Impl final : public NFS_Server::Service {
     return Status::OK;
   }
 
-  Status Read(ServerContext* context, const HelloRequest* request,
-                  HelloReply* reply) override {
-    return Status::OK;
-  }
+	Status Read(ServerContext* context, const ReadRequest* request,
+			ReadResponse* response) override {
+		int fd, mount_id, mount_fd;
+		size_t read_sz = request->size(), actual_read_sz = request->size();
+		off_t offset = request->offset();
+		FileHandle fh = request->fh();
+		const file_handle *fhp = reinterpret_cast<const file_handle *> 
+			(fh.handle().c_str());
+		mount_id = fh.mount_id();
+
+		char buffer[read_sz];
+		// Buffer buff;
+
+		cout << "Received File Handle" << endl;
+		cout << "Mount Id : " << mount_id  << "\n"
+				<< "Path : " << fh.path() << "\n"
+				<< "FH: " << endl;
+		for (int i = 0; i < fhp->handle_bytes; i++) {
+			 cout << std::hex << (int) fhp->f_handle[i] << " ";
+		}
+		cout << std::flush << endl;
+		// Optimize later by maintaining <fh, fd> map
+		/* Open file using handle and mount point */
+		mount_fd = open_mount_path_by_id(mount_id);
+		cout << "Mount FD :" << mount_fd << endl;
+		fd = open_by_handle_at(mount_fd, (file_handle *) fhp, O_RDONLY);
+		if (fd == -1) {
+			cerr << __LINE__ << " : " <<
+				"Unexpected result from open_by_handle_at()\n"
+				<< "ERROR No. is " << errno << endl;
+			return Status::CANCELLED;
+		}
+	
+		if (lseek(fd, offset, SEEK_SET) >= 0) /* get to pos */
+			actual_read_sz = read(fd, buffer, read_sz);
+		else {
+			cerr << __LINE__ << " : " <<
+				"Unexpected result from lseek()\n";
+			return Status::CANCELLED;
+		}
+	
+		if (actual_read_sz == -1){
+			cerr << __LINE__ << " : " <<
+				"Read failed at server\n";
+			return Status::CANCELLED;
+
+		}
+	
+		// buff.set_size(read_sz);
+		// buff.set_data(string(reinterpret_cast<char *>(buffer)));
+		
+		response->mutable_buff()->set_size(read_sz);
+		response->mutable_buff()->set_data(string(reinterpret_cast<char *>(buffer)));
+		response->set_actual_read_bytes(actual_read_sz);
+
+		return Status::OK;
+	}
 
   Status Write(ServerContext* context, const HelloRequest* request,
                   HelloReply* reply) override {

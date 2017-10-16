@@ -24,12 +24,14 @@ using NFS_DFS::HelloRequest;
 using NFS_DFS::HelloReply;
 using NFS_DFS::LookupMessage;
 using NFS_DFS::FileHandle;
+using NFS_DFS::ReadRequest;
+using NFS_DFS::ReadResponse;
 using NFS_DFS::Buffer;
 
 using namespace std;
 
 typedef struct file_handle file_handle;
-const char *const  server_ip = "10.128.0.2:50051";
+const char *const  server_ip = "10.128.0.3:50051";
 
 // This class handles all grpc related calls.
 class NFS_Client {
@@ -41,6 +43,7 @@ class NFS_Client {
   FileHandle Lookup_File(string&& path);
 	Buffer Read_Directory(string&& path);
 	Buffer Get_File_Attributes(string&& path);
+	ReadResponse Read_File(FileHandle &fh, off_t offset, size_t size);
  private:
   std::unique_ptr<NFS_Server::Stub> stub_;
 };
