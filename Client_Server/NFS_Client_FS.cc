@@ -16,7 +16,7 @@ unique_ptr<NFS_Client> ClientFS::client_ptr;
 
 FileHandle NFS_Client::Lookup_File(string&& path) {
     // Data we are sending to the server.
-    LookupMessage file_path;
+LookupMessage file_path;
     file_path.set_path(path);
 
     // Container for the data we expect from the server.
@@ -108,10 +108,57 @@ Buffer NFS_Client::Get_File_Attributes(string &&path) {
 		Status status = stub_->Getattr(&context, file_path, &reply);
 		if (status.ok()) {
 		} else {
-      std::cout << status.error_code() << ": " << status.error_message()
+      cout << status.error_code() << ": " << status.error_message()
                 << std::endl << std::flush;
+			reply.set_size(0);
 		}
 		return move(reply);
+}
+
+WriteResponse NFS_Client::Write_File(FileHandle& fh, const char *buf,
+												off_t offset, size_t size) {
+	WriteRequest request;
+	request.mutable_fh()->set_path(fh.path());
+	request.mutable_fh()->set_mount_id(fh.mount_id());
+	const file_handle *fhp =
+		reinterpret_cast<const file_handle *> (fh.handle().c_str());
+	request.mutable_fh()->set_handle(string((const char*)fhp, fhp->handle_bytes));
+
+	request.set_offset(offset);
+	request.set_size(size);
+	
+	request.mutable_buff()->set_data(buf, size);
+	request.mutable_buff()->set_size(size);
+	
+	WriteResponse reply;
+	ClientContext context;
+
+	Status status = stub_->Write(&context, request, &reply);
+
+	if (!status.ok()) {
+		cerr << __LINE__ << ": " <<  status.error_code() << ": "
+			<< status.error_message() << std::endl << std::flush;
+	}
+
+	return move(reply);
+}
+
+
+Integer NFS_Client::Create_File(const char *path, mode_t mode) {
+	FileCreateRequest request;
+	request.set_path(string(path));
+	request.set_mode(mode);
+
+	Integer reply;
+	ClientContext context;
+
+	Status status = stub_->CreateFile(&context, request, &reply);
+
+	if (!status.ok()) {
+		cerr << __LINE__ << ": " <<  status.error_code() << ": "
+			<< status.error_message() << std::endl << std::flush;
+	}
+	return move(reply);
 }
 
 int ClientFS::getattr(const char *path, struct stat *stbuf, struct fuse_file_info *)
@@ -121,6 +168,13 @@ int ClientFS::getattr(const char *path, struct stat *stbuf, struct fuse_file_inf
 
 	memset(stbuf, 0, sizeof(struct stat));
 	Buffer buff = client_ptr->Get_File_Attributes(string(path));
+	
+	if (buff.size() == 0) {
+		// file does not exit.
+		cout << "No such file or direcotry\n";
+		return -ENOENT;
+	}
+
 	memcpy(stbuf, buff.data().c_str(), sizeof(struct stat));
 	return res;
 }
@@ -131,6 +185,7 @@ int ClientFS::readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	cout << "Open dir request for file = " << path << endl << std::flush ;
 
 	Buffer buff = client_ptr->Read_Directory(string(path));
+
 
 	string copy = buff.data();
 	char *arr = (char*)(copy.c_str());
@@ -209,3 +264,31 @@ int ClientFS::read(const char *path, char *buf, size_t size, off_t offset,
 	
 	return size;
 }
+
+
+int ClientFS::write(const char *path, const char *buf, size_t size,
+								off_t offset, struct fuse_file_info *fi) {
+	cout << "Write request for file = " << path << endl << std::flush;
+
+	if (path == nullptr) {
+		return -EBADR;
+	}	
+	
+	FileHandleMap::iterator fh_itr = file_handle_map_.find(string(path));
+	if (fh_itr == file_handle_map_.end()) {
+		return -EBADR;
+	}
+	
+	WriteResponse wresp = client_ptr->Write_File(file_handle_map_[string(path)],
+		buf, offset, size);
+	
+	return wresp.actual_bytes_written();
+}
+
+int ClientFS::create(const char * path, mode_t mode, struct fuse_file_info *fi) {
+	cout << "File create request for file = " << path << endl << std::flush;
+	Integer ret = client_ptr->Create_File(path, mode);
+	return 0;
+}
+
+

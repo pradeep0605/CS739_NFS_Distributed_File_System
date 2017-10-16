@@ -15,6 +15,9 @@
 #include "NFS_Client_FS.h"
 #include <chrono>
 #include <thread>
+#include <fcntl.h>
+#include <sys/stat.h>
+
 
 using grpc::Channel;
 using grpc::ClientContext;
@@ -27,6 +30,10 @@ using NFS_DFS::FileHandle;
 using NFS_DFS::ReadRequest;
 using NFS_DFS::ReadResponse;
 using NFS_DFS::Buffer;
+using NFS_DFS::WriteResponse;
+using NFS_DFS::WriteRequest;
+using NFS_DFS::FileCreateRequest;
+using NFS_DFS::Integer;
 
 using namespace std;
 
@@ -44,6 +51,10 @@ class NFS_Client {
 	Buffer Read_Directory(string&& path);
 	Buffer Get_File_Attributes(string&& path);
 	ReadResponse Read_File(FileHandle &fh, off_t offset, size_t size);
+	WriteResponse Write_File(FileHandle& fh, const char *,
+																	off_t offset, size_t size);
+	Integer Create_File(const char *, mode_t mode);
+
  private:
   std::unique_ptr<NFS_Server::Stub> stub_;
 };
@@ -80,6 +91,11 @@ public:
 
   static int read(const char *path, char *buf, size_t size, off_t offset,
                   struct fuse_file_info *fi);
+
+	static int write(const char *path, const char *buf, size_t size,
+									off_t offset, struct fuse_file_info *fi);
+
+	static int create(const char * path, mode_t mode, struct fuse_file_info *fi);
 };
 
 #endif

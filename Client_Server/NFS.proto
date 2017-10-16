@@ -24,14 +24,19 @@ package NFS_DFS;
 service NFS_Server{
   rpc Lookup (LookupMessage) returns (FileHandle) {}
   rpc Read (ReadRequest) returns (ReadResponse) {}
-  rpc Write (HelloRequest) returns (HelloReply) {}
+  rpc Write (WriteRequest) returns (WriteResponse) {}
   rpc Readdir (LookupMessage) returns (Buffer) {}
   rpc Getattr (LookupMessage) returns (Buffer) {}
+  rpc CreateFile (FileCreateRequest) returns (Integer) {}
 }
 
 // The request message containing the user's name.
 message HelloRequest {
   string name = 1;
+}
+
+message Integer {
+	int32 data = 1;
 }
 
 message Buffer {
@@ -59,6 +64,21 @@ message ReadResponse {
 	int32 actual_read_bytes = 2;
 }
 
+message WriteRequest {
+	FileHandle fh = 1;
+	int32 offset = 2;
+	int32 size = 3;
+	Buffer buff = 4;
+}
+
+message FileCreateRequest {
+	string path = 1;
+	int32 mode = 2;
+}
+
+message WriteResponse {
+	int32 actual_bytes_written = 1;
+}
 // The response message containing the greetings
 message HelloReply {
   string message = 1;
