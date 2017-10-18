@@ -60,47 +60,16 @@ using namespace std;
 
 typedef struct file_handle file_handle;
 
-static int open_mount_path_by_id(int mount_id) {
-	char *linep;
-	size_t lsize;
-	char mount_path[PATH_MAX];
-	int mi_mount_id, found;
-	ssize_t nread;
-	FILE *fp;
-
-	fp = fopen("/proc/self/mountinfo", "r");
-	if (fp == NULL)
-		exit(1);
-
-	found = 0;
-	linep = NULL;
-	while (!found) {
-		nread = getline(&linep, &lsize, fp);
-		if (nread == -1)
-			break;
-
-		nread = sscanf(linep, "%d %*d %*s %*s %s",
-				&mi_mount_id, mount_path);
-		if (nread != 2) {
-			fprintf(stderr, "Bad sscanf()\n");
-			exit(EXIT_FAILURE);
-		}
-
-		if (mi_mount_id == mount_id)
-			found = 1;
+void print_FileHandle(FileHandle& fh) {
+	cout << "Path = " << fh.path() << "\tmount_id = " << fh.mount_id() << "\t";
+	const file_handle *fhp = reinterpret_cast<const file_handle *>
+					(fh.handle().c_str());
+	cout << "handle_bytes = " << fhp->handle_bytes << "\t handle = [";
+	for(unsigned int i = 0;  i < fhp->handle_bytes; ++i) {
+		cout <<	std::hex << (unsigned int) fhp->f_handle[i] << " ";
 	}
-	free(linep);
-
-	fclose(fp);
-
-	if (!found) {
-		fprintf(stderr, "Could not find mount point\n");
-		exit(EXIT_FAILURE);
-	}
-
-	return open(mount_path, O_RDONLY);
+	cout << "]" << endl << std::dec << std::flush;
 }
-
 
 string root_prefix;
 
@@ -189,7 +158,7 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 		reply->set_path(file_path);
 		reply->set_mount_id(mount_id);
 		reply->set_handle(string(reinterpret_cast<char *>(fhp), fhsize));
-
+		
 		free(fhp);
     return Status::OK;
   }
@@ -205,56 +174,45 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 		mount_id = fh.mount_id();
 
 		char buffer[read_sz];
-		// Buffer buff;
 
-		cout << "Received File Handle" << endl;
-		cout << "Mount Id : " << mount_id  << "\n"
-				<< "Path : " << fh.path() << "\n"
-				<< "FH: " << endl;
-		for (int i = 0; i < fhp->handle_bytes; i++) {
-			 cout << std::hex << (int) fhp->f_handle[i] << " ";
-		}
-		cout << std::flush << endl;
 		// Optimize later by maintaining <fh, fd> map
 		/* Open file using handle and mount point */
 		mount_fd = open_mount_path_by_id(mount_id);
-		cout << "Mount FD :" << mount_fd << endl;
 		fd = open_by_handle_at(mount_fd, (file_handle *) fhp, O_RDONLY);
 		if (fd == -1) {
-			cerr << __LINE__ << " : " <<
-				"Unexpected result from open_by_handle_at()\n"
-				<< "ERROR No. is " << errno << endl;
+			cerr << __LINE__ << " : " << "Unexpected result from open_by_handle_at()\n"
+					<< "ERROR No. is " << errno << endl;
 			return Status::CANCELLED;
 		}
 	
-		if (lseek(fd, offset, SEEK_SET) >= 0) /* get to pos */
+		if (lseek(fd, offset, SEEK_SET) >= 0) /* get to pos */ {
 			actual_read_sz = read(fd, buffer, read_sz);
-		else {
-			cerr << __LINE__ << " : " <<
-				"Unexpected result from lseek()\n";
+		} else {
+			cerr << __LINE__ << " : " << "Unexpected result from lseek()\n";
 			return Status::CANCELLED;
 		}
 	
 		if (actual_read_sz == -1){
-			cerr << __LINE__ << " : " <<
-				"Read failed at server\n";
+			cerr << __LINE__ << " : " << "Read failed at server\n";
 			return Status::CANCELLED;
-
 		}
 	
 		// buff.set_size(read_sz);
 		// buff.set_data(string(reinterpret_cast<char *>(buffer)));
 		
 		response->mutable_buff()->set_size(read_sz);
-		response->mutable_buff()->set_data(string(reinterpret_cast<char *>(buffer)));
+		response->mutable_buff()->set_data(string(reinterpret_cast<char *>(buffer),
+				actual_read_sz));
 		response->set_actual_read_bytes(actual_read_sz);
-
 		return Status::OK;
+  }
 
   Status Write(ServerContext* context, const WriteRequest* request,
                   WriteResponse* reply) override {
 
+		cout << "Write request for file " << request->fh().path() << endl;
 		FileHandle fh = request->fh();
+
 		const file_handle *fhp = reinterpret_cast<const file_handle *>
 					(fh.handle().c_str());
 		FileOpenMap::iterator file_itr = file_open_map_.find(fh.path());
@@ -264,8 +222,22 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 		if (file_itr == file_open_map_.end()) {
 			int mount_fd = open_mount_path_by_id(mount_id);
 			fd = open_by_handle_at(mount_fd, (file_handle *) fhp, O_WRONLY);
+			if (fd < 0) {
+				cerr << __LINE__ << ": " << "Unable to open file \"" <<	fh.path()
+					   << "\" for writing\n" << endl << std::flush;
+				reply->set_actual_bytes_written(0);
+			}
 		}
 
+		if (lseek(fd, request->offset(), SEEK_SET) >= 0) {
+			// seeks success.
+			int written = write(fd, request->buff().data().c_str(), request->size());
+			if (written < 0) {
+				cerr << __LINE__ << ": " << "Unable to Write to file \"" <<	fh.path()
+					   << endl << std::flush;
+			}
+			reply->set_actual_bytes_written(written);
+		}
     return Status::OK;
   }
 
@@ -283,7 +255,7 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 				directory_contents = directory_contents + string(dp->d_name) + "\n";
 			}
 		}	while (dp != nullptr);
-		
+
 		closedir(dir_fd);
 		reply->set_size(directory_contents.size());
 		reply->set_data(directory_contents);
@@ -302,11 +274,17 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 
 	Status CreateFile(ServerContext* context, const FileCreateRequest *request,
 		Integer *reply) override {
-		mode_t mode = static_cast<mode_t>(request->mode());
+		mode_t mode = request->mode();
+		
+		cout << "File " << request->path() << " Created" << " with mode = "
+				<< std::hex << mode << std::dec << endl << std::flush;
 		string file_path = root_prefix + request->path();
 		int fd = creat(file_path.c_str(), mode);
+		if (fd < 0) {
+			cerr << __LINE__ << ": " << "Unable to create file with permission "
+				<< std::hex << mode << std::dec << endl << std::flush;
+		}
 		reply->set_data(fd);
-		cout << "File " << request->path() << " Created" << endl;
 		close(fd);
 		return Status::OK;
 	}

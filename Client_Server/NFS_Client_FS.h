@@ -38,7 +38,8 @@ using NFS_DFS::Integer;
 using namespace std;
 
 typedef struct file_handle file_handle;
-const char *const  server_ip = "10.128.0.3:50051";
+// const char *const  server_ip = "10.128.0.3:50051";
+const char *const  server_ip = "localhost:50051";
 
 // This class handles all grpc related calls.
 class NFS_Client {

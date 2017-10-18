@@ -6,13 +6,21 @@
 // include in one .cpp file
 #include "../include/Fuse-impl.h"
 
-static const char *hello_str = "Hello World!\n";
-static const char *hello_path = "/hello";
-
 using namespace std;
 
 FileHandleMap ClientFS::file_handle_map_;
 unique_ptr<NFS_Client> ClientFS::client_ptr;
+
+void print_FileHandle(FileHandle& fh) {
+  cout << "Path = " << fh.path() << "\tmount_id = " << fh.mount_id() << "\t";
+	const file_handle *fhp = reinterpret_cast<const file_handle *>
+				(fh.handle().c_str());
+	cout << "handle_bytes = " << fhp->handle_bytes << "\t handle = [";
+	for(unsigned int i = 0;  i < fhp->handle_bytes; ++i) {
+		cout << std::hex << (unsigned int) fhp->f_handle[i] << " "; 
+	}
+	cout << "]" << endl << std::dec << std::flush;
+}
 
 FileHandle NFS_Client::Lookup_File(string&& path) {
     // Data we are sending to the server.
@@ -28,7 +36,6 @@ LookupMessage file_path;
     // The actual RPC.
     Status status = stub_->Lookup(&context, file_path, &reply);
 
-		cout << "========= inside lookup ==============" << endl;
     // Act upon its status.
     if (status.ok()) {
 			cout << "File " << reply.path() << " opened." << endl << std::flush;
@@ -76,25 +83,19 @@ ReadResponse NFS_Client::Read_File(FileHandle &fh, off_t offset, size_t size) {
 	const file_handle *fhp = reinterpret_cast<const file_handle *>
 		(fh.handle().c_str());
 	read_req.mutable_fh()->set_handle(string((const char*)fhp, 
-		fhp->handle_bytes +	8));
+		fhp->handle_bytes +	sizeof(file_handle)));
 	read_req.set_offset(offset);
 	read_req.set_size(size);
 
 	ReadResponse resp;
 	ClientContext context;
 
-	cout << "File Handle Bytes : " << fhp->handle_bytes  << endl << std::flush;
-	for (unsigned int i = 0; i < fhp->handle_bytes; i++) {
-		cout << std::hex << (int) fhp->f_handle[i] << " ";
-	}
-	cout << std::flush;
-
 	Status status = stub_->Read(&context, read_req, &resp);
-	/*if (!status.ok()) {
+	if (!status.ok()) {
       std::cout << status.error_code() << ": " << status.error_message()
                 << std::endl << std::flush;
-		
-	}*/
+	}
+
 	return move(resp);
 }
 
@@ -122,11 +123,16 @@ WriteResponse NFS_Client::Write_File(FileHandle& fh, const char *buf,
 	request.mutable_fh()->set_mount_id(fh.mount_id());
 	const file_handle *fhp =
 		reinterpret_cast<const file_handle *> (fh.handle().c_str());
-	request.mutable_fh()->set_handle(string((const char*)fhp, fhp->handle_bytes));
+	request.mutable_fh()->set_handle(string((const char*)fhp,
+	// 	fh.handle().size()));
+	// cout << "Handle size = " << fh.handle().size() << endl;
+	fhp->handle_bytes + sizeof(file_handle)));
+	cout << "Handle size = " << fhp->handle_bytes + sizeof(file_handle)
+		<< " = " << fhp->handle_bytes << " + " << sizeof(file_handle) << endl;
 
 	request.set_offset(offset);
 	request.set_size(size);
-	
+
 	request.mutable_buff()->set_data(buf, size);
 	request.mutable_buff()->set_size(size);
 	
@@ -171,7 +177,6 @@ int ClientFS::getattr(const char *path, struct stat *stbuf, struct fuse_file_inf
 	
 	if (buff.size() == 0) {
 		// file does not exit.
-		cout << "No such file or direcotry\n";
 		return -ENOENT;
 	}
 
@@ -250,19 +255,12 @@ int ClientFS::read(const char *path, char *buf, size_t size, off_t offset,
 		return -1;
 	}
 
-	// if ((size_t)offset < len) {
-		// if (offset + size > len)
-			// size = len - offset;
-		// Send Read request to Server and get the response
-		ReadResponse rd_resp = client_ptr->Read_File(fh_itr->second, offset, size);
-		// Copy the response to the bufferr
-		actual_read = rd_resp.actual_read_bytes();
-		memcpy(buf, rd_resp.buff().data().c_str(), actual_read);
-		size = actual_read;
-	//} else
-	//	size = 0;
+	ReadResponse rd_resp = client_ptr->Read_File(fh_itr->second, offset, size);
+	// Copy the response to the bufferr
+	actual_read = rd_resp.actual_read_bytes();
+	memcpy(buf, rd_resp.buff().data().c_str(), actual_read);
 	
-	return size;
+	return actual_read;
 }
 
 
@@ -286,9 +284,15 @@ int ClientFS::write(const char *path, const char *buf, size_t size,
 }
 
 int ClientFS::create(const char * path, mode_t mode, struct fuse_file_info *fi) {
-	cout << "File create request for file = " << path << endl << std::flush;
-	Integer ret = client_ptr->Create_File(path, mode);
-	return 0;
+	cout << "File create request for file = " << path << " with mode = "
+	<< std::hex <<  mode << std::dec << endl << std::flush;
+	// Request server to create the file.
+	Integer ret_val = client_ptr->Create_File(path, mode);
+	int ret = ret_val.data();
+	if (ret < 0) { return ret;}
+	// Lookup the file to get the file handle.
+	ret = open(path, fi);
+	return ret;
 }
 
 
