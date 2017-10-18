@@ -236,6 +236,26 @@ Integer NFS_Client::Delete_Directory(string&& path) {
 	return move(reply);
 }
 
+// ============================================================================
+
+Integer NFS_Client::Rename_File(string&& from, string&& to, unsigned int flags) {
+	RenameRequest request;
+	request.set_from_path(from);
+	request.set_to_path(to);
+	request.set_flags(flags);
+
+	Integer reply;
+	ClientContext contet;
+
+	Status status = stub_->RenameFile(&contet, request, &reply);
+
+	if (!status.ok()) {
+		cerr << __LINE__ << ": " <<  status.error_code() << ": "
+				<< status.error_message() << std::endl << std::flush;
+	}
+	return move(reply);
+}
+
 // =============================================================================
 // ClientFS static function defined below.
 // =============================================================================
@@ -418,6 +438,33 @@ int ClientFS::rmdir (const char *path) {
 
 // ============================================================================
 
+int ClientFS::rename (const char *from_path, const char *to_path,
+		unsigned int flags) {
+	cout << "Rename requested from " << from_path << " to " << to_path
+			<< endl << std::flush;
+
+	if (from_path == nullptr || to_path == nullptr) {
+		return -EINVAL;
+	}
+
+	Integer ret_val = client_ptr->Rename_File(string(from_path), string(to_path),
+		flags);
+
+	if (ret_val.data() < 0) {
+		return ret_val.data();
+	}
+	
+	// If file handle is already present for 'from_path' file and we're trying to
+	// move it to 'to_path' then we'll have to delete the filehandle entry for
+	// 'from_path' file. Moreover, the same handle should be used for 'to_path'.
+	FileHandleMap::iterator itr = file_handle_map_.find(string(from_path));
+	if (itr != file_handle_map_.end()) {
+		file_handle_map_[string(to_path)] = move(itr->second);
+		file_handle_map_.erase(itr);
+	}
+
+	return 0;
+}
 
 // ============================================================================
 

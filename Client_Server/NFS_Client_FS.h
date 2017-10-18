@@ -32,6 +32,7 @@ using NFS_DFS::WriteResponse;
 using NFS_DFS::WriteRequest;
 using NFS_DFS::FileCreateRequest;
 using NFS_DFS::Integer;
+using NFS_DFS::RenameRequest;
 
 using namespace std;
 
@@ -56,6 +57,7 @@ class NFS_Client {
 	Integer Delete_File(string&& path);
 	Integer Create_Directory(string&& path, mode_t mode);
 	Integer Delete_Directory(string&& path);
+	Integer Rename_File(string&& from, string&& to, unsigned int flags);
  private:
   std::unique_ptr<NFS_Server::Stub> stub_;
 };
@@ -103,6 +105,9 @@ public:
 	static int mkdir (const char *, mode_t);
 
 	static int rmdir (const char *path);
+
+	static int rename (const char *from_path, const char *to_path,
+		unsigned int);
 };
 
 #endif

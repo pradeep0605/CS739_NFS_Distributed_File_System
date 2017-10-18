@@ -31,6 +31,7 @@ service NFS_Server{
 	rpc DeleteFile (LookupMessage) returns (Integer) {}
 	rpc CreateDirectory (FileCreateRequest) returns (Integer) {}
 	rpc DeleteDirectory (LookupMessage) returns (Integer) {}
+	rpc RenameFile (RenameRequest) returns (Integer) {}
 }
 
 // The request message containing the user's name.
@@ -79,14 +80,21 @@ message WriteRequest {
 	Buffer buff = 4;
 }
 
+message WriteResponse {
+	int32 actual_bytes_written = 1;
+}
+
 message FileCreateRequest {
 	string path = 1;
 	int32 mode = 2;
 }
 
-message WriteResponse {
-	int32 actual_bytes_written = 1;
+message RenameRequest {
+	string from_path = 1;
+	string to_path = 2;
+	int32	flags = 3;
 }
+
 
 
 

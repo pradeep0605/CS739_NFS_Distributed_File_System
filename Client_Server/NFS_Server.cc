@@ -53,6 +53,7 @@ using NFS_DFS::WriteRequest;
 using NFS_DFS::WriteResponse;
 using NFS_DFS::FileCreateRequest;
 using NFS_DFS::Integer;
+using NFS_DFS::RenameRequest;
 
 using namespace std;
 
@@ -336,7 +337,7 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 		reply->set_data(ret);
 
 		if (ret < 0) {
-			cerr << __LINE__ << ": " << "Unable to the direcoty " << file_path 
+			cerr << __LINE__ << ": " << "Unable to create the direcoty " << file_path 
 					<< endl << std::flush;
 			return Status::CANCELLED;
 		}
@@ -353,8 +354,26 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 		reply->set_data(ret);
 
 		if (ret < 0) {
-			cerr << __LINE__ << ": " << "Unable to the direcoty " << file_path 
+			cerr << __LINE__ << ": " << "Unable to Delete the direcoty " << file_path 
 					<< endl << std::flush;
+			return Status::CANCELLED;
+		}
+		return Status::OK;
+	}
+
+// ============================================================================
+	
+	Status RenameFile (ServerContext *context, const RenameRequest *request,
+		Integer *reply) override {
+		string from_file_path = root_prefix + request->from_path();
+		string to_file_path = root_prefix + request->to_path();
+		
+		int ret = rename(from_file_path.c_str(), to_file_path.c_str());
+		reply->set_data(ret);
+
+		if (ret < 0) {
+			cerr << __LINE__ << ": " << "Unable to rename from " << from_file_path 
+					<< " to " << to_file_path << endl << std::flush;
 			return Status::CANCELLED;
 		}
 		return Status::OK;
