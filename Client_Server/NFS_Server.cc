@@ -42,8 +42,6 @@ using grpc::ServerBuilder;
 using grpc::ServerContext;
 using grpc::Status;
 using NFS_DFS::NFS_Server;
-using NFS_DFS::HelloRequest;
-using NFS_DFS::HelloReply;
 using NFS_DFS::LookupMessage;
 using NFS_DFS::FileHandle;
 using NFS_DFS::ReadRequest;
@@ -70,6 +68,8 @@ void print_FileHandle(FileHandle& fh) {
 	}
 	cout << "]" << endl << std::dec << std::flush;
 }
+
+// ============================================================================
 
 string root_prefix;
 
@@ -119,6 +119,8 @@ open_mount_path_by_id(int mount_id)
 	return open(mount_path, O_RDONLY);
 }
 
+// ============================================================================
+
 // Logic and data behind the server's behavior.
 class NFS_Server_Impl final : public NFS_Server::Service {
 
@@ -163,6 +165,8 @@ class NFS_Server_Impl final : public NFS_Server::Service {
     return Status::OK;
   }
 
+// ============================================================================
+
 	Status Read(ServerContext* context, const ReadRequest* request,
 			ReadResponse* response) override {
 		int fd, mount_id, mount_fd;
@@ -174,6 +178,8 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 		mount_id = fh.mount_id();
 
 		char buffer[read_sz];
+		response->mutable_buff()->set_size(0);
+		response->set_actual_read_bytes(-1);
 
 		// Optimize later by maintaining <fh, fd> map
 		/* Open file using handle and mount point */
@@ -207,6 +213,8 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 		return Status::OK;
   }
 
+// ============================================================================
+
   Status Write(ServerContext* context, const WriteRequest* request,
                   WriteResponse* reply) override {
 
@@ -217,6 +225,7 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 					(fh.handle().c_str());
 		FileOpenMap::iterator file_itr = file_open_map_.find(fh.path());
 		int mount_id = fh.mount_id();
+		reply->set_actual_bytes_written(0);
 		
 		int fd;
 		if (file_itr == file_open_map_.end()) {
@@ -225,7 +234,8 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 			if (fd < 0) {
 				cerr << __LINE__ << ": " << "Unable to open file \"" <<	fh.path()
 					   << "\" for writing\n" << endl << std::flush;
-				reply->set_actual_bytes_written(0);
+				reply->set_actual_bytes_written(-1);
+				return Status::CANCELLED;
 			}
 		}
 
@@ -240,6 +250,8 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 		}
     return Status::OK;
   }
+
+// ============================================================================
 
   Status Readdir(ServerContext* context, const LookupMessage* request,
                   Buffer* reply) override {
@@ -262,6 +274,8 @@ class NFS_Server_Impl final : public NFS_Server::Service {
     return Status::OK;
   }
 
+// ============================================================================
+
   Status Getattr(ServerContext* context, const LookupMessage* request,
 				Buffer* reply) override {
 		string file_path = root_prefix + request->path();
@@ -272,9 +286,12 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 		return (status == 0) ? Status::OK : Status::CANCELLED;
 	}
 
+// ============================================================================
+
 	Status CreateFile(ServerContext* context, const FileCreateRequest *request,
 		Integer *reply) override {
 		mode_t mode = request->mode();
+		reply->set_data(-1);
 		
 		cout << "File " << request->path() << " Created" << " with mode = "
 				<< std::hex << mode << std::dec << endl << std::flush;
@@ -283,28 +300,75 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 		if (fd < 0) {
 			cerr << __LINE__ << ": " << "Unable to create file with permission "
 				<< std::hex << mode << std::dec << endl << std::flush;
+			return Status::CANCELLED;
 		}
+
 		reply->set_data(fd);
 		close(fd);
 		return Status::OK;
 	}
 
+// ============================================================================
+
 	Status DeleteFile(ServerContext* context, const LookupMessage *request,
 	Integer *reply) override {
 		string file_path = root_prefix + request->path();
 		int ret = unlink(file_path.c_str());
+		
+		reply->set_data(ret);
+	
 		if (ret < 0) {
 			cerr << __LINE__ << ": " << "Unable to delete the file " << file_path 
 					<< endl << std::flush;
 			return Status::CANCELLED;
 		}
-		reply->set_data(ret);
 		return Status::OK;
 	}
+
+// ============================================================================
+
+	Status CreateDirectory (ServerContext* context, const FileCreateRequest *request,
+		Integer *reply) override {
+		string file_path = root_prefix + request->path();
+		mode_t mode  = request->mode();
+
+		int ret = mkdir(file_path.c_str(), mode);
+		reply->set_data(ret);
+
+		if (ret < 0) {
+			cerr << __LINE__ << ": " << "Unable to the direcoty " << file_path 
+					<< endl << std::flush;
+			return Status::CANCELLED;
+		}
+		return Status::OK;
+	}
+
+// ============================================================================
+
+	Status DeleteDirectory (ServerContext *context, const LookupMessage *request,
+		Integer *reply) override {
+		string file_path = root_prefix + request->path();
+		
+		int ret = rmdir(file_path.c_str());
+		reply->set_data(ret);
+
+		if (ret < 0) {
+			cerr << __LINE__ << ": " << "Unable to the direcoty " << file_path 
+					<< endl << std::flush;
+			return Status::CANCELLED;
+		}
+		return Status::OK;
+	}
+
+// ============================================================================
+	
 	private:
 	typedef unordered_map<string, int> FileOpenMap;
 	FileOpenMap file_open_map_; // keeps trak of files open for writing.
 };
+
+// ============================================================================
+
 
 void RunServer(char *root) {
   std::string server_address("0.0.0.0:50051");
@@ -329,6 +393,8 @@ void RunServer(char *root) {
   server->Wait();
 }
 
+// ============================================================================
+
 int main(int argc, char** argv) {
 	if (argc < 2) {
 		cout << "Usage: NFS_Sserver root_directory" << endl;
@@ -337,3 +403,5 @@ int main(int argc, char** argv) {
   RunServer(argv[1]);
   return 0;
 }
+
+// ============================================================================

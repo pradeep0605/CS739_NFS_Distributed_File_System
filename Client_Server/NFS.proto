@@ -29,12 +29,19 @@ service NFS_Server{
   rpc Getattr (LookupMessage) returns (Buffer) {}
   rpc CreateFile (FileCreateRequest) returns (Integer) {}
 	rpc DeleteFile (LookupMessage) returns (Integer) {}
+	rpc CreateDirectory (FileCreateRequest) returns (Integer) {}
+	rpc DeleteDirectory (LookupMessage) returns (Integer) {}
 }
 
 // The request message containing the user's name.
-message HelloRequest {
-  string name = 1;
-}
+//  message HelloRequest {
+//   string name = 1;
+// }
+// The response message containing the greetings
+// message HelloReply {
+//   string message = 1;
+// }
+
 
 message Integer {
 	int32 data = 1;
@@ -80,10 +87,17 @@ message FileCreateRequest {
 message WriteResponse {
 	int32 actual_bytes_written = 1;
 }
-// The response message containing the greetings
-message HelloReply {
-  string message = 1;
-}
+
+
+
+
+
+
+
+
+
+
+
 
 
 

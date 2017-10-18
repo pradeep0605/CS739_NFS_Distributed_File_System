@@ -8,6 +8,8 @@
 
 using namespace std;
 
+// ============================================================================
+
 FileHandleMap ClientFS::file_handle_map_;
 unique_ptr<NFS_Client> ClientFS::client_ptr;
 
@@ -21,6 +23,8 @@ void print_FileHandle(FileHandle& fh) {
 	}
 	cout << "]" << endl << std::dec << std::flush;
 }
+
+// ============================================================================
 
 FileHandle NFS_Client::Lookup_File(string&& path) {
     // Data we are sending to the server.
@@ -56,6 +60,7 @@ LookupMessage file_path;
 		return move(reply);
 }
 
+// ============================================================================
 
 Buffer NFS_Client::Read_Directory(string &&path) {
     LookupMessage file_path;
@@ -74,6 +79,8 @@ Buffer NFS_Client::Read_Directory(string &&path) {
 		}
 		return move(reply);
 }
+
+// ============================================================================
 
 ReadResponse NFS_Client::Read_File(FileHandle &fh, off_t offset, size_t size) {
 	ReadRequest read_req;
@@ -99,6 +106,8 @@ ReadResponse NFS_Client::Read_File(FileHandle &fh, off_t offset, size_t size) {
 	return move(resp);
 }
 
+// ============================================================================
+
 Buffer NFS_Client::Get_File_Attributes(string &&path) {
     LookupMessage file_path;
     file_path.set_path(path);
@@ -115,6 +124,8 @@ Buffer NFS_Client::Get_File_Attributes(string &&path) {
 		}
 		return move(reply);
 }
+
+// ============================================================================
 
 WriteResponse NFS_Client::Write_File(FileHandle& fh, const char *buf,
 												off_t offset, size_t size) {
@@ -149,6 +160,7 @@ WriteResponse NFS_Client::Write_File(FileHandle& fh, const char *buf,
 	return move(reply);
 }
 
+// ============================================================================
 
 Integer NFS_Client::Create_File(const char *path, mode_t mode) {
 	FileCreateRequest request;
@@ -167,6 +179,7 @@ Integer NFS_Client::Create_File(const char *path, mode_t mode) {
 	return move(reply);
 }
 
+// ============================================================================
 
 Integer NFS_Client::Delete_File(string&& path) {
 	LookupMessage request;
@@ -184,6 +197,44 @@ Integer NFS_Client::Delete_File(string&& path) {
 	return move(reply);
 }
 
+// ============================================================================
+
+Integer NFS_Client::Create_Directory(string&& path, mode_t mode) {
+	FileCreateRequest request;
+	request.set_path(string(path));
+	request.set_mode(mode);
+
+	Integer reply;
+	ClientContext context;
+
+	Status status = stub_->CreateDirectory(&context, request, &reply);
+
+	if (!status.ok()) {
+		cerr << __LINE__ << ": " <<  status.error_code() << ": "
+				<< status.error_message() << std::endl << std::flush;
+	}
+
+	return move(reply);
+}
+
+// ============================================================================
+
+Integer NFS_Client::Delete_Directory(string&& path) {
+	LookupMessage request;
+	request.set_path(path);
+
+	Integer reply;
+	ClientContext context;
+
+	Status status = stub_->DeleteDirectory(&context, request, &reply);
+	
+	if (!status.ok()) {
+		cerr << __LINE__ << ": " <<  status.error_code() << ": "
+				<< status.error_message() << std::endl << std::flush;
+	}
+
+	return move(reply);
+}
 
 // =============================================================================
 // ClientFS static function defined below.
@@ -207,6 +258,8 @@ int ClientFS::getattr(const char *path, struct stat *stbuf, struct fuse_file_inf
 	return res;
 }
 
+// ============================================================================
+
 int ClientFS::readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 										off_t, struct fuse_file_info *,
                      enum fuse_readdir_flags) {
@@ -225,6 +278,7 @@ int ClientFS::readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	return 0;
 }
 
+// ============================================================================
 
 int ClientFS::open(const char *path, struct fuse_file_info *fi)
 {
@@ -238,30 +292,13 @@ int ClientFS::open(const char *path, struct fuse_file_info *fi)
 	// File handle not present 
 	if (fh_itr == file_handle_map_.end()) {
 		FileHandle fh = client_ptr->Lookup_File(string(path));
-		
-		file_handle *fhp = reinterpret_cast<file_handle *>
-			((char *)fh.handle().c_str());
-		cout << "FH in Lookup before Map " << endl;
-		for (unsigned int i = 0; i < fhp->handle_bytes; i++) { 
-			cout << std::hex << (int) fhp->f_handle[i] << " ";
-		}
-		cout << endl;
-	
 		file_handle_map_[string(path)] = move(fh);
-
-		file_handle *fhp1 = reinterpret_cast<file_handle *>
-			((char *)file_handle_map_[string(path)].handle().c_str());
-		
-		cout << "FH in Lookup after Map " << endl;
-		for (unsigned int i = 0; i < fhp1->handle_bytes; i++) { 
-			cout << std::hex << (int) fhp1->f_handle[i] << " ";
-		}
-		cout << endl;
 	}
 	// If file handle already present, then all cool.
 	return 0;
 }
 
+// ============================================================================
 
 int ClientFS::read(const char *path, char *buf, size_t size, off_t offset,
 		              struct fuse_file_info *fi)
@@ -281,11 +318,16 @@ int ClientFS::read(const char *path, char *buf, size_t size, off_t offset,
 	ReadResponse rd_resp = client_ptr->Read_File(fh_itr->second, offset, size);
 	// Copy the response to the bufferr
 	actual_read = rd_resp.actual_read_bytes();
+	if (actual_read < 0) {
+		return actual_read;
+	}
+
 	memcpy(buf, rd_resp.buff().data().c_str(), actual_read);
 	
 	return actual_read;
 }
 
+// ============================================================================
 
 int ClientFS::write(const char *path, const char *buf, size_t size,
 								off_t offset, struct fuse_file_info *fi) {
@@ -306,10 +348,15 @@ int ClientFS::write(const char *path, const char *buf, size_t size,
 	return wresp.actual_bytes_written();
 }
 
+// ============================================================================
+
 int ClientFS::create(const char * path, mode_t mode, struct fuse_file_info *fi) {
 	cout << "File create request for file = " << path << " with mode = "
 	<< std::hex <<  mode << std::dec << endl << std::flush;
 	// Request server to create the file.
+	if (path == nullptr) {
+		return -EINVAL;
+	}
 	Integer ret_val = client_ptr->Create_File(path, mode);
 	int ret = ret_val.data();
 	if (ret < 0) { return ret;}
@@ -318,12 +365,13 @@ int ClientFS::create(const char * path, mode_t mode, struct fuse_file_info *fi) 
 	return ret;
 }
 
+// ============================================================================
 
 int ClientFS::unlink(const char *path) {
 	cout << "File delete request for file = " << path << endl << std::flush;
 
 	if (path == nullptr) {
-		return EINVAL;
+		return -EINVAL;
 	}
 
 	Integer ret_val = client_ptr->Delete_File(path);
@@ -334,3 +382,45 @@ int ClientFS::unlink(const char *path) {
 	return -ENOENT;
 }
 
+// ============================================================================
+
+int ClientFS::mkdir (const char *path, mode_t mode) {
+	cout << "Directory creation requested for folder = " << path << endl
+			<< std::flush;
+
+	if (path == nullptr) {
+		return -EINVAL;
+	}
+
+	Integer ret_val = client_ptr->Create_Directory(string(path), mode);
+	if (ret_val.data() < 0) {
+		return ret_val.data();
+	}
+
+	return 0;
+}
+
+// ============================================================================
+
+int ClientFS::rmdir (const char *path) {
+	cout << "Directory delete request for " << path << endl << std::flush;
+	if (path == nullptr) {
+		return -EINVAL;
+	}
+
+	Integer ret_val = client_ptr->Delete_Directory(string(path));
+	if (ret_val.data() < 0) {
+		return ret_val.data();
+	}
+	return 0;
+}
+
+
+// ============================================================================
+
+
+// ============================================================================
+
+
+
+// ============================================================================

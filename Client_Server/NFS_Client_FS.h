@@ -23,8 +23,6 @@ using grpc::Channel;
 using grpc::ClientContext;
 using grpc::Status;
 using NFS_DFS::NFS_Server;
-using NFS_DFS::HelloRequest;
-using NFS_DFS::HelloReply;
 using NFS_DFS::LookupMessage;
 using NFS_DFS::FileHandle;
 using NFS_DFS::ReadRequest;
@@ -56,6 +54,8 @@ class NFS_Client {
 																	off_t offset, size_t size);
 	Integer Create_File(const char *, mode_t mode);
 	Integer Delete_File(string&& path);
+	Integer Create_Directory(string&& path, mode_t mode);
+	Integer Delete_Directory(string&& path);
  private:
   std::unique_ptr<NFS_Server::Stub> stub_;
 };
@@ -99,6 +99,10 @@ public:
 	static int create(const char * path, mode_t mode, struct fuse_file_info *fi);
 
 	static int unlink(const char * path);
+
+	static int mkdir (const char *, mode_t);
+
+	static int rmdir (const char *path);
 };
 
 #endif
