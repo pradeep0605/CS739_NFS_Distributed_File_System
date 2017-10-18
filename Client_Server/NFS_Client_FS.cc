@@ -167,6 +167,29 @@ Integer NFS_Client::Create_File(const char *path, mode_t mode) {
 	return move(reply);
 }
 
+
+Integer NFS_Client::Delete_File(string&& path) {
+	LookupMessage request;
+	request.set_path(path);
+
+	Integer reply;
+	ClientContext context;
+
+	Status status = stub_->DeleteFile(&context, request, &reply);
+
+	if (!status.ok()) {
+		cerr << __LINE__ << ": " <<  status.error_code() << ": "
+			<< status.error_message() << std::endl << std::flush;
+	}
+	return move(reply);
+}
+
+
+// =============================================================================
+// ClientFS static function defined below.
+// =============================================================================
+
+
 int ClientFS::getattr(const char *path, struct stat *stbuf, struct fuse_file_info *)
 {
 	int res = 0;
@@ -295,4 +318,19 @@ int ClientFS::create(const char * path, mode_t mode, struct fuse_file_info *fi) 
 	return ret;
 }
 
+
+int ClientFS::unlink(const char *path) {
+	cout << "File delete request for file = " << path << endl << std::flush;
+
+	if (path == nullptr) {
+		return EINVAL;
+	}
+
+	Integer ret_val = client_ptr->Delete_File(path);
+	if (ret_val.data() == 0) {
+		return 0;
+	}
+
+	return -ENOENT;
+}
 

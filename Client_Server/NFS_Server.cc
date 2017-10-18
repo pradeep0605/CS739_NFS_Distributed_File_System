@@ -289,6 +289,18 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 		return Status::OK;
 	}
 
+	Status DeleteFile(ServerContext* context, const LookupMessage *request,
+	Integer *reply) override {
+		string file_path = root_prefix + request->path();
+		int ret = unlink(file_path.c_str());
+		if (ret < 0) {
+			cerr << __LINE__ << ": " << "Unable to delete the file " << file_path 
+					<< endl << std::flush;
+			return Status::CANCELLED;
+		}
+		reply->set_data(ret);
+		return Status::OK;
+	}
 	private:
 	typedef unordered_map<string, int> FileOpenMap;
 	FileOpenMap file_open_map_; // keeps trak of files open for writing.

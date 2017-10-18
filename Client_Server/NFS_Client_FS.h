@@ -55,7 +55,7 @@ class NFS_Client {
 	WriteResponse Write_File(FileHandle& fh, const char *,
 																	off_t offset, size_t size);
 	Integer Create_File(const char *, mode_t mode);
-
+	Integer Delete_File(string&& path);
  private:
   std::unique_ptr<NFS_Server::Stub> stub_;
 };
@@ -97,6 +97,8 @@ public:
 									off_t offset, struct fuse_file_info *fi);
 
 	static int create(const char * path, mode_t mode, struct fuse_file_info *fi);
+
+	static int unlink(const char * path);
 };
 
 #endif

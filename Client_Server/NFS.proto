@@ -28,6 +28,7 @@ service NFS_Server{
   rpc Readdir (LookupMessage) returns (Buffer) {}
   rpc Getattr (LookupMessage) returns (Buffer) {}
   rpc CreateFile (FileCreateRequest) returns (Integer) {}
+	rpc DeleteFile (LookupMessage) returns (Integer) {}
 }
 
 // The request message containing the user's name.
