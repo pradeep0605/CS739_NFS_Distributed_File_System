@@ -34,6 +34,7 @@ using NFS_DFS::FileCreateRequest;
 using NFS_DFS::Integer;
 using NFS_DFS::RenameRequest;
 
+#define CONN_ERR_CODE (14)
 using namespace std;
 
 typedef struct file_handle file_handle;
@@ -44,9 +45,15 @@ const char *const  server_ip = "localhost:50051";
 class NFS_Client {
  public:
   NFS_Client(std::shared_ptr<Channel> channel)
-      : stub_(NFS_Server::NewStub(channel)) {}
+      : channel_(channel),
+				stub_(NFS_Server::NewStub(channel)) {}
   // Assembles the client's payload, sends it and presents the response back
   // from the server.
+	~NFS_Client() {
+		channel_ = nullptr;
+	}
+
+	friend int Reconnect_To_Server();
   FileHandle Lookup_File(string&& path);
 	Buffer Read_Directory(string&& path);
 	Buffer Get_File_Attributes(string&& path);
@@ -58,7 +65,9 @@ class NFS_Client {
 	Integer Create_Directory(string&& path, mode_t mode);
 	Integer Delete_Directory(string&& path);
 	Integer Rename_File(string&& from, string&& to, unsigned int flags);
+	Status Ping_Server();
  private:
+	std::shared_ptr<Channel> channel_;
   std::unique_ptr<NFS_Server::Stub> stub_;
 };
 
@@ -69,13 +78,18 @@ class ClientFS : public Fusepp::Fuse<ClientFS>
 	static FileHandleMap file_handle_map_;
 	static unique_ptr<NFS_Client> client_ptr;
 public:
+	
+	friend int Reconnect_To_Server();
 
-	static void Initialize_Client() {
+	static std::shared_ptr<Channel> Initialize_Client() {
 		if (ClientFS::client_ptr != nullptr) {
+			cout << "Setting client_ptr to nullptr\n";
 			client_ptr = nullptr;
 		}
-		ClientFS::client_ptr = make_unique<NFS_Client>(grpc::CreateChannel(server_ip, 
-		 grpc::InsecureChannelCredentials()));
+		std::shared_ptr<Channel> channel_ = grpc::CreateChannel(server_ip,
+				grpc::InsecureChannelCredentials());
+		ClientFS::client_ptr = make_unique<NFS_Client>(channel_);
+		return channel_;
 	}
   ClientFS() {
 	}

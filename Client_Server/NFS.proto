@@ -22,6 +22,7 @@ option objc_class_prefix = "HLW";
 package NFS_DFS;
 
 service NFS_Server{
+	rpc Ping(Integer) returns (Integer) {}
   rpc Lookup (LookupMessage) returns (FileHandle) {}
   rpc Read (ReadRequest) returns (ReadResponse) {}
   rpc Write (WriteRequest) returns (WriteResponse) {}

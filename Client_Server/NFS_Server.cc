@@ -125,6 +125,18 @@ open_mount_path_by_id(int mount_id)
 // Logic and data behind the server's behavior.
 class NFS_Server_Impl final : public NFS_Server::Service {
 
+// ============================================================================
+	Status Ping(ServerContext * context, const Integer *request, Integer *reply) {
+		cout << "ping." << request->data() << endl << std::flush;
+		if (request->data() != 0xbadadd) {
+			return Status::CANCELLED;
+		}
+
+		reply->set_data(0xdeadbeef);
+		return Status::OK;
+	}
+
+// ============================================================================
   Status Lookup(ServerContext* context, const LookupMessage* request,
                   FileHandle* reply) override {
 		string file_path = root_prefix + request->path();

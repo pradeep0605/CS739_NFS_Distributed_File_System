@@ -10,6 +10,43 @@ using namespace std;
 
 // ============================================================================
 
+int Reconnect_To_Server() {
+	Integer request;
+	request.set_data(0xbadadd);
+
+	int sleep_time_ms = 50;
+	const int RETRY_TIMEOUT = 300; /* 15 seconds */
+	int iterations = 0;
+	Status status = Status::CANCELLED;
+	do {
+		if (iterations++ >= RETRY_TIMEOUT) {
+			return -1;
+		}
+		cout << "Reconnect try " << iterations << endl;
+
+		this_thread::sleep_for(std::chrono::milliseconds(sleep_time_ms));
+		// Reinitialize client_ptr; i.e., reconnect to server
+		// ClientFS::client_ptr->channel_->~Channel();
+		// std::shared_ptr<Channel> channel = ClientFS::Initialize_Client();
+		// initialize stub again
+		//ClientFS::channel_.WaitForConnected();
+		/*
+		gpr_timespec timeOut;
+		timeOut.tv_sec = 0;
+		timeOut.tv_nsec = 1000 * 200; // 50 Miliseconds
+		timeOut.clock_type = GPR_TIMESPAN;
+		ClientFS::client_ptr->channel_->WaitForConnected(timeOut);
+		*/
+		status = ClientFS::client_ptr->Ping_Server();
+		cout << "Error code = " << status.error_code() << endl;
+	} while(!status.ok());
+	//}	while(ClientFS::client_ptr->channel_->GetState(true) != GRPC_CHANNEL_READY);
+
+	// Successfully reconnected to server
+	return 0;
+}
+// ============================================================================
+
 FileHandleMap ClientFS::file_handle_map_;
 unique_ptr<NFS_Client> ClientFS::client_ptr;
 
@@ -41,19 +78,12 @@ LookupMessage file_path;
     Status status = stub_->Lookup(&context, file_path, &reply);
 
     // Act upon its status.
-    if (status.ok()) {
-			cout << "File " << reply.path() << " opened." << endl << std::flush;
-    } else {
-      std::cout << status.error_code() << ": " << status.error_message()
-                << std::endl << std::flush;
-
-			int sleep_time_ms = 50;
-			const int RETRY_TIMEOUT = 200; /* 10 seconds */
-			int iterations = 0;
-			while(!status.ok() && iterations < RETRY_TIMEOUT) {
-				Status status = stub_->Lookup(&context, file_path, &reply);
-				iterations++;
-				this_thread::sleep_for(std::chrono::milliseconds(sleep_time_ms));
+    if (!status.ok()) {
+			if (status.error_code() == CONN_ERR_CODE) {
+				if (Reconnect_To_Server() != 0) {
+					cerr << __LINE__ << ": " << "Unable to reconnect to the server"
+						<< endl << std::flush;
+				}
 			}
 		}
 		//  When iterations >= RETRY_TIMEOUT, an empty reply is sent.
@@ -71,11 +101,12 @@ Buffer NFS_Client::Read_Directory(string &&path) {
 
 		Status status = stub_->Readdir(&context, file_path, &reply);
 		if (!status.ok()) {
-			if (status.error_code() == 14 /* Server crashed */) {
-				
+			if (status.error_code() == CONN_ERR_CODE) {
+				if (Reconnect_To_Server() != 0) {
+					cerr << __LINE__ << ": " << "Unable to reconnect to the server"
+						<< endl << std::flush;
+				}
 			}
-      std::cout << status.error_code() << ": " << status.error_message()
-                << std::endl << std::flush;
 		}
 		return move(reply);
 }
@@ -101,6 +132,12 @@ ReadResponse NFS_Client::Read_File(FileHandle &fh, off_t offset, size_t size) {
 	if (!status.ok()) {
       std::cout << status.error_code() << ": " << status.error_message()
                 << std::endl << std::flush;
+			if (status.error_code() == CONN_ERR_CODE) {
+				if (Reconnect_To_Server() != 0) {
+					cerr << __LINE__ << ": " << "Unable to reconnect to the server"
+						<< endl << std::flush;
+				}
+			}
 	}
 
 	return move(resp);
@@ -116,11 +153,16 @@ Buffer NFS_Client::Get_File_Attributes(string &&path) {
 		ClientContext context;
 
 		Status status = stub_->Getattr(&context, file_path, &reply);
-		if (status.ok()) {
-		} else {
+		if (!status.ok()) {
       cout << status.error_code() << ": " << status.error_message()
                 << std::endl << std::flush;
 			reply.set_size(0);
+			if (status.error_code() == CONN_ERR_CODE) {
+				if (Reconnect_To_Server() != 0) {
+					cerr << __LINE__ << ": " << "Unable to reconnect to the server"
+						<< endl << std::flush;
+				}
+			}
 		}
 		return move(reply);
 }
@@ -155,6 +197,12 @@ WriteResponse NFS_Client::Write_File(FileHandle& fh, const char *buf,
 	if (!status.ok()) {
 		cerr << __LINE__ << ": " <<  status.error_code() << ": "
 			<< status.error_message() << std::endl << std::flush;
+			if (status.error_code() == CONN_ERR_CODE) {
+				if (Reconnect_To_Server() != 0) {
+					cerr << __LINE__ << ": " << "Unable to reconnect to the server"
+						<< endl << std::flush;
+				}
+			}
 	}
 
 	return move(reply);
@@ -175,6 +223,12 @@ Integer NFS_Client::Create_File(const char *path, mode_t mode) {
 	if (!status.ok()) {
 		cerr << __LINE__ << ": " <<  status.error_code() << ": "
 			<< status.error_message() << std::endl << std::flush;
+			if (status.error_code() == CONN_ERR_CODE) {
+				if (Reconnect_To_Server() != 0) {
+					cerr << __LINE__ << ": " << "Unable to reconnect to the server"
+						<< endl << std::flush;
+				}
+			}
 	}
 	return move(reply);
 }
@@ -193,6 +247,12 @@ Integer NFS_Client::Delete_File(string&& path) {
 	if (!status.ok()) {
 		cerr << __LINE__ << ": " <<  status.error_code() << ": "
 			<< status.error_message() << std::endl << std::flush;
+			if (status.error_code() == CONN_ERR_CODE) {
+				if (Reconnect_To_Server() != 0) {
+					cerr << __LINE__ << ": " << "Unable to reconnect to the server"
+						<< endl << std::flush;
+				}
+			}
 	}
 	return move(reply);
 }
@@ -212,6 +272,12 @@ Integer NFS_Client::Create_Directory(string&& path, mode_t mode) {
 	if (!status.ok()) {
 		cerr << __LINE__ << ": " <<  status.error_code() << ": "
 				<< status.error_message() << std::endl << std::flush;
+		if (status.error_code() == CONN_ERR_CODE) {
+			if (Reconnect_To_Server() != 0) {
+				cerr << __LINE__ << ": " << "Unable to reconnect to the server"
+					<< endl << std::flush;
+			}
+		}
 	}
 
 	return move(reply);
@@ -231,6 +297,12 @@ Integer NFS_Client::Delete_Directory(string&& path) {
 	if (!status.ok()) {
 		cerr << __LINE__ << ": " <<  status.error_code() << ": "
 				<< status.error_message() << std::endl << std::flush;
+		if (status.error_code() == CONN_ERR_CODE) {
+			if (Reconnect_To_Server() != 0) {
+				cerr << __LINE__ << ": " << "Unable to reconnect to the server"
+					<< endl << std::flush;
+			}
+		}
 	}
 
 	return move(reply);
@@ -245,15 +317,35 @@ Integer NFS_Client::Rename_File(string&& from, string&& to, unsigned int flags) 
 	request.set_flags(flags);
 
 	Integer reply;
-	ClientContext contet;
+	ClientContext context;
 
-	Status status = stub_->RenameFile(&contet, request, &reply);
+	Status status = stub_->RenameFile(&context, request, &reply);
 
 	if (!status.ok()) {
 		cerr << __LINE__ << ": " <<  status.error_code() << ": "
 				<< status.error_message() << std::endl << std::flush;
 	}
 	return move(reply);
+}
+
+// ============================================================================
+
+Status NFS_Client::Ping_Server() {
+	Integer request;
+	request.set_data(0xbadadd);
+
+	Integer reply;
+	ClientContext context;
+	
+	#if 0
+	gpr_timespec timeOut;
+	timeOut.tv_sec = 0;
+	timeOut.tv_nsec = 1000 * 50; // 50 Miliseconds
+	timeOut.clock_type = GPR_TIMESPAN;
+	context.set_deadline(timeOut);
+	#endif
+	Status status = stub_->Ping(&context, request, &reply);
+	return move(status);
 }
 
 // =============================================================================
