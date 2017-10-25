@@ -153,9 +153,11 @@ Buffer NFS_Client::Get_File_Attributes(string &&path) {
 		ClientContext context;
 
 		Status status = stub_->Getattr(&context, file_path, &reply);
+
 		if (!status.ok()) {
-      cout << status.error_code() << ": " << status.error_message()
-                << std::endl << std::flush;
+			// No need to handle error. The file might not acutally exist and it is
+			// all cool. All we need to do is the set the size of the reply to zero to
+			// indicate that the stat of the requested file couldn't be found.
 			reply.set_size(0);
 			if (status.error_code() == CONN_ERR_CODE) {
 				if (Reconnect_To_Server() != 0) {
@@ -509,10 +511,13 @@ int ClientFS::write(const char *path, const char *buf, size_t size,
 		return -EBADR;
 	}
 	
-//	WriteResponse wresp = client_ptr->Write_File(file_handle_map_[string(path)],
-//		buf, offset, size);
+	#if 0
+	WriteResponse wresp = client_ptr->Write_File(file_handle_map_[string(path)],
+		buf, offset, size);
+	#else 
 	WriteResponse wresp = client_ptr->Write_File_Async(
 		file_handle_map_[string(path)], buf, offset, size);
+	#endif
 	
 	return wresp.actual_bytes_written();
 }
@@ -544,7 +549,12 @@ int ClientFS::unlink(const char *path) {
 	}
 
 	Integer ret_val = client_ptr->Delete_File(path);
+
 	if (ret_val.data() == 0) {
+		FileHandleMap::iterator itr = file_handle_map_.find(string(path));
+		if (itr != file_handle_map_.end()) {
+			file_handle_map_.erase(itr);
+		}
 		return 0;
 	}
 

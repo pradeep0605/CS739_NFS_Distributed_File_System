@@ -80,7 +80,7 @@ string root_prefix;
 #define errExit(msg)    do { perror(msg); exit(EXIT_FAILURE); \
 } while (0)
 
-	static int
+static int
 open_mount_path_by_id(int mount_id)
 {
 	char *linep;
@@ -226,6 +226,9 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 		response->mutable_buff()->set_data(string(reinterpret_cast<char *>(buffer),
 				actual_read_sz));
 		response->set_actual_read_bytes(actual_read_sz);
+
+		close(fd);
+		close(mount_fd);
 		return Status::OK;
   }
 
@@ -234,7 +237,7 @@ class NFS_Server_Impl final : public NFS_Server::Service {
   Status Write(ServerContext* context, const WriteRequest* request,
                   WriteResponse* reply) override {
 
-		cout << "Write request for file " << request->fh().path() << endl;
+		cout << "Sync write on file " << request->fh().path() << endl;
 		FileHandle fh = request->fh();
 
 		const file_handle *fhp = reinterpret_cast<const file_handle *>
@@ -244,13 +247,15 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 		reply->set_actual_bytes_written(0);
 		
 		int fd;
+		int mount_fd;
 		if (file_itr == file_open_map_.end()) {
-			int mount_fd = open_mount_path_by_id(mount_id);
+			mount_fd = open_mount_path_by_id(mount_id);
 			fd = open_by_handle_at(mount_fd, (file_handle *) fhp, O_WRONLY);
 			if (fd < 0) {
 				cerr << __LINE__ << ": " << "Unable to open file \"" <<	fh.path()
 					   << "\" for writing\n" << endl << std::flush;
 				reply->set_actual_bytes_written(-1);
+				close(mount_fd);
 				return Status::CANCELLED;
 			}
 		}
@@ -261,9 +266,15 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 			if (written < 0) {
 				cerr << __LINE__ << ": " << "Unable to Write to file \"" <<	fh.path()
 					   << endl << std::flush;
+			} else {
+				// if write is succuessful, fsync the data to disk.
+				fsync(fd);
 			}
 			reply->set_actual_bytes_written(written);
 		}
+
+		close(mount_fd);
+		close(fd);
     return Status::OK;
   }
 
@@ -274,7 +285,7 @@ class NFS_Server_Impl final : public NFS_Server::Service {
   Status Write_Async(ServerContext* context, const WriteRequest* request,
                   WriteResponse* reply) override {
 
-		cout << "Async Write request for file " << request->fh().path() << endl;
+		cout << "Async Write on file " << request->fh().path() << endl;
 		FileHandle fh = request->fh();
 
 		const file_handle *fhp = reinterpret_cast<const file_handle *>
@@ -284,13 +295,15 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 		reply->set_actual_bytes_written(0);
 		
 		int fd;
+		int mount_fd;
 		if (file_itr == file_open_map_.end()) {
-			int mount_fd = open_mount_path_by_id(mount_id);
+			mount_fd = open_mount_path_by_id(mount_id);
 			fd = open_by_handle_at(mount_fd, (file_handle *) fhp, O_WRONLY);
 			if (fd < 0) {
 				cerr << __LINE__ << ": " << "Unable to open file \"" <<	fh.path()
 					   << "\" for writing\n" << endl << std::flush;
 				reply->set_actual_bytes_written(-1);
+				close(mount_fd);
 				return Status::CANCELLED;
 			}
 		}
@@ -308,21 +321,16 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 		serveraio->aio_buf = (volatile void*) (dyn_buff);
 		serveraio->aio_sigevent.sigev_notify = SIGEV_NONE;
 
-//		if (lseek(fd, request->offset(), SEEK_SET) >= 0) {
-			// seeks success.
-			// int written = write(fd, request->buff().data().c_str(), request->size());
-			int written = aio_write(serveraio);
-			cout << "Tried to Async Write.\nThe return code is : "
-				<< written <<
-				endl;
-					 // << "\nERROR No. is " << errno << endl; 
-			if (written != 0) {
-				cerr << __LINE__ << ": " << "Unable to Write to file \"" <<	fh.path()
-					   << endl << std::flush;
-			}
-//			fsync(fd);
-			reply->set_actual_bytes_written(request->size());
-//		}
+		int written = aio_write(serveraio);
+		cout << "Tried to Async Write.\nThe return code is : " << written << endl;
+		if (written != 0) {
+			cerr << __LINE__ << ": " << "Unable to Write to file \"" <<	fh.path()
+					 << endl << std::flush;
+		}
+		
+		reply->set_actual_bytes_written(request->size());
+		close(fd);
+		close(mount_fd);
     return Status::OK;
   }
 
@@ -333,8 +341,6 @@ Status Fsync(ServerContext* context, const FileHandle* fh, Integer* reply) {
 		(fh->handle().c_str());
 	int mount_id = fh->mount_id();
 
-	cout << "Calling fsync in server" << endl;
-
 	int mount_fd = open_mount_path_by_id(mount_id);
 	int fd = open_by_handle_at(mount_fd, (file_handle *) fhp, O_WRONLY);
 	if (fd == -1) {
@@ -343,11 +349,11 @@ Status Fsync(ServerContext* context, const FileHandle* fh, Integer* reply) {
   	return Status::CANCELLED;
 	}
 
-	cout << "Done with fsync on server" << endl;
-	
 	int f_ret = fsync(fd);
 	reply->set_data(f_ret);
+
 	close(fd);
+	close(mount_fd);
 	return Status::OK;
 }
 
@@ -381,10 +387,13 @@ Status Fsync(ServerContext* context, const FileHandle* fh, Integer* reply) {
 				Buffer* reply) override {
 		string file_path = root_prefix + request->path();
 		struct stat st;
-		int status = 	stat(file_path.c_str(), &st);
+		int ret = stat(file_path.c_str(), &st);
+		// No need to handle failures in stat because the file being requested might
+		// not actually exit. So, it will return with an error.
 		reply->set_size(sizeof(st));
 		reply->set_data(string(reinterpret_cast<char*>(&st), sizeof(st)));
-		return (status == 0) ? Status::OK : Status::CANCELLED;
+	
+		return (ret == 0) ? Status::OK : Status::CANCELLED;
 	}
 
 // ============================================================================
