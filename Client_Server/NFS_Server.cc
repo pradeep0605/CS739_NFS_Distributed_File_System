@@ -147,7 +147,10 @@ class NFS_Server_Impl final : public NFS_Server::Service {
   Status Lookup(ServerContext* context, const LookupMessage* request,
                   FileHandle* reply) override {
 		string file_path = root_prefix + request->path();
-
+		
+		#ifdef DBG_PRINTS_ENABLED
+		cout << "Lookup for file " << file_path << endl << std::flush;
+		#endif
 		// Hopefully 16 bytes are enough for the handle, else realloc the structure.
 		int fhsize = sizeof(file_handle) + 16; 
 		file_handle *fhp = (file_handle *) malloc(fhsize);
@@ -189,6 +192,9 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 
 	Status Read(ServerContext* context, const ReadRequest* request,
 			ReadResponse* response) override {
+		#ifdef DBG_PRINTS_ENABLED
+		cout << "Read Request for file " << request->fh().path() << endl;
+		#endif
 		int fd, mount_id, mount_fd;
 		size_t read_sz = request->size(), actual_read_sz = request->size();
 		off_t offset = request->offset();
@@ -205,9 +211,18 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 		/* Open file using handle and mount point */
 		mount_fd = open_mount_path_by_id(mount_id);
 		fd = open_by_handle_at(mount_fd, (file_handle *) fhp, O_RDONLY);
-		if (fd == -1) {
-			cerr << __LINE__ << " : " << "Unexpected result from open_by_handle_at()\n"
-					<< "ERROR No. is " << errno << endl;
+		if (fd < 0) {
+			if (errno == 116) {
+				// stale file handle.
+				response->set_error_code(116);
+				cerr << __LINE__ << " : " << "stale file handle found. Error = " 
+						<< response->error_code() << endl;
+
+				return Status(grpc::StatusCode::INVALID_ARGUMENT, "Stale File Handle");
+			} else {
+				cerr << __LINE__ << " : " << "Unexpected result from open_by_handle_at()\n"
+						<< "ERROR No. is " << errno << endl;
+			}
 			return Status::CANCELLED;
 		}
 	
@@ -258,8 +273,16 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 			mount_fd = open_mount_path_by_id(mount_id);
 			fd = open_by_handle_at(mount_fd, (file_handle *) fhp, O_WRONLY);
 			if (fd < 0) {
-				cerr << __LINE__ << ": " << "Unable to open file \"" <<	fh.path()
-					   << "\" for writing\n" << endl << std::flush;
+				if (errno == 116) {
+					// stale file handle.
+					reply->set_error_code(116);
+					cerr << __LINE__ << " : " << "Stale file handle found. Error = " 
+							<< reply->error_code() << endl;
+					return Status(grpc::StatusCode::INVALID_ARGUMENT, "Stale File Handle");
+				} else {
+					cerr << __LINE__ << ": " << "Unable to open file \"" <<	fh.path()
+							 << "\" for writing\n" << endl << std::flush;
+				}
 				reply->set_actual_bytes_written(-1);
 				close(mount_fd);
 				return Status::CANCELLED;
@@ -308,8 +331,16 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 			mount_fd = open_mount_path_by_id(mount_id);
 			fd = open_by_handle_at(mount_fd, (file_handle *) fhp, O_WRONLY);
 			if (fd < 0) {
-				cerr << __LINE__ << ": " << "Unable to open file \"" <<	fh.path()
-					   << "\" for writing\n" << endl << std::flush;
+				if (errno == 116) {
+					// stale file handle.
+					reply->set_error_code(116);
+					cerr << __LINE__ << " : " << "Stale file handle found. Error = " 
+							<< reply->error_code() << endl;
+					return Status(grpc::StatusCode::INVALID_ARGUMENT, "Stale File	Handle");
+				} else {
+					cerr << __LINE__ << ": " << "Unable to open file \"" <<	fh.path()
+							 << "\" for writing\n" << endl << std::flush;
+				}
 				reply->set_actual_bytes_written(-1);
 				close(mount_fd);
 				return Status::CANCELLED;
@@ -350,12 +381,23 @@ Status Fsync(ServerContext* context, const FileHandle* fh, Integer* reply) {
 	const file_handle *fhp = reinterpret_cast<const file_handle *> 
 		(fh->handle().c_str());
 	int mount_id = fh->mount_id();
-
+	#ifdef DBG_PRINTS_ENABLED
+	cout << "Commit on file " << fh->path() << " called" << endl;
+	#endif
+	
 	int mount_fd = open_mount_path_by_id(mount_id);
 	int fd = open_by_handle_at(mount_fd, (file_handle *) fhp, O_WRONLY);
-	if (fd == -1) {
+	if (fd < 0) {
+		if (errno == 116) {
+			// stale file handle.
+			reply->set_data(116);
+			cerr << __LINE__ << " : " << "stale file handle found. Error = " 
+				<< reply->data() <<	endl;
+			return Status(grpc::StatusCode::INVALID_ARGUMENT, "Stale File Handle");
+		} else {
 		cerr << __LINE__ << " : " << "Unexpected result from open_by_handle_at()\n"
 		   << "ERROR No. is " << errno << endl;
+		}
   	return Status::CANCELLED;
 	}
 
@@ -375,6 +417,9 @@ Status Fsync(ServerContext* context, const FileHandle* fh, Integer* reply) {
 		string dir_path = root_prefix + request->path();
 		int fd = open(dir_path.c_str(), O_RDONLY);
 		DIR *dir_fd = fdopendir(fd);
+		#ifdef DBG_PRINTS_ENABLED
+		cout  << "Read dir request for directory " << dir_path << endl;
+		#endif
 		
 		string directory_contents = "";
 		struct dirent *dp;
@@ -398,6 +443,9 @@ Status Fsync(ServerContext* context, const FileHandle* fh, Integer* reply) {
 		string file_path = root_prefix + request->path();
 		struct stat st;
 		int ret = stat(file_path.c_str(), &st);
+		#ifdef DBG_PRINTS_ENABLED
+		cout << "Get attribute requested for file " << file_path << endl;
+		#endif
 		// No need to handle failures in stat because the file being requested might
 		// not actually exit. So, it will return with an error.
 		reply->set_size(sizeof(st));
@@ -435,6 +483,9 @@ Status Fsync(ServerContext* context, const FileHandle* fh, Integer* reply) {
 	Status DeleteFile(ServerContext* context, const LookupMessage *request,
 	Integer *reply) override {
 		string file_path = root_prefix + request->path();
+		#ifdef DBG_PRINTS_ENABLED
+			cout << "Delete file request for " << file_path << endl;
+		#endif
 		int ret = unlink(file_path.c_str());
 		
 		reply->set_data(ret);
@@ -453,7 +504,9 @@ Status Fsync(ServerContext* context, const FileHandle* fh, Integer* reply) {
 		Integer *reply) override {
 		string file_path = root_prefix + request->path();
 		mode_t mode  = request->mode();
-
+		#ifdef DBG_PRINTS_ENABLED
+			cout << "Create directory requested : " << file_path << endl;
+		#endif
 		int ret = mkdir(file_path.c_str(), mode);
 		reply->set_data(ret);
 
@@ -470,7 +523,9 @@ Status Fsync(ServerContext* context, const FileHandle* fh, Integer* reply) {
 	Status DeleteDirectory (ServerContext *context, const LookupMessage *request,
 		Integer *reply) override {
 		string file_path = root_prefix + request->path();
-		
+		#ifdef DBG_PRINTS_ENABLED
+			cout << "Delete directory on : " << file_path << endl;
+		#endif
 		int ret = rmdir(file_path.c_str());
 		reply->set_data(ret);
 
@@ -488,7 +543,11 @@ Status Fsync(ServerContext* context, const FileHandle* fh, Integer* reply) {
 		Integer *reply) override {
 		string from_file_path = root_prefix + request->from_path();
 		string to_file_path = root_prefix + request->to_path();
-		
+		#ifdef DBG_PRINTS_ENABLED
+			cout << "Rename request from : " << from_file_path << " to " 
+				<< to_file_path << endl;
+		#endif
+			
 		int ret = rename(from_file_path.c_str(), to_file_path.c_str());
 		reply->set_data(ret);
 

@@ -74,6 +74,7 @@ message ReadRequest {
 message ReadResponse {
 	Buffer buff = 1;
 	int32 actual_read_bytes = 2;
+	int32 error_code = 3;
 }
 
 message WriteRequest {
@@ -85,6 +86,7 @@ message WriteRequest {
 
 message WriteResponse {
 	int32 actual_bytes_written = 1;
+	int32 error_code = 2;
 }
 
 message FileCreateRequest {

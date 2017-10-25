@@ -135,16 +135,22 @@ ReadResponse NFS_Client::Read_File(FileHandle &fh, off_t offset, size_t size) {
 	ClientContext context;
 
 	Status status = stub_->Read(&context, read_req, &resp);
+
 	if (!status.ok()) {
-     	cerr << __LINE__ << " : " << "Error in reading file: " << 
-				status.error_code() << ": " << status.error_message()
-                << std::endl << std::flush;
-			if (status.error_code() == CONN_ERR_CODE) {
-				if (Reconnect_To_Server() != 0) {
-					cerr << __LINE__ << ": " << "Unable to reconnect to the server"
-						<< endl << std::flush;
-				}
+		cerr << __LINE__ << " : " << "Error in reading file: " << 
+			status.error_code() << ": " << status.error_message()
+							<< std::endl << std::flush;
+
+		if (status.error_code() == grpc::StatusCode::INVALID_ARGUMENT) {
+			resp.set_error_code(116);
+		}
+
+		if (status.error_code() == CONN_ERR_CODE) {
+			if (Reconnect_To_Server() != 0) {
+				cerr << __LINE__ << ": " << "Unable to reconnect to the server"
+					<< endl << std::flush;
 			}
+		}
 	}
 
 	return move(resp);
@@ -207,12 +213,17 @@ WriteResponse NFS_Client::Write_File(FileHandle& fh, const char *buf,
 	if (!status.ok()) {
 		cerr << __LINE__ << ": " <<  status.error_code() << ": "
 			<< status.error_message() << std::endl << std::flush;
-			if (status.error_code() == CONN_ERR_CODE) {
-				if (Reconnect_To_Server() != 0) {
-					cerr << __LINE__ << ": " << "Unable to reconnect to the server"
-						<< endl << std::flush;
-				}
+
+		if (status.error_code() == grpc::StatusCode::INVALID_ARGUMENT) {
+			reply.set_error_code(116);
+		}
+
+		if (status.error_code() == CONN_ERR_CODE) {
+			if (Reconnect_To_Server() != 0) {
+				cerr << __LINE__ << ": " << "Unable to reconnect to the server"
+					<< endl << std::flush;
 			}
+		}
 	}
 
 	return move(reply);
@@ -251,12 +262,17 @@ WriteResponse NFS_Client::Write_File_Async(FileHandle& fh, const char *buf,
 	if (!status.ok()) {
 		cerr << __LINE__ << ": " <<  status.error_code() << ": "
 			<< status.error_message() << std::endl << std::flush;
-			if (status.error_code() == CONN_ERR_CODE) {
-				if (Reconnect_To_Server() != 0) {
-					cerr << __LINE__ << ": " << "Unable to reconnect to the server"
-						<< endl << std::flush;
-				}
+		
+		if (status.error_code() == grpc::StatusCode::INVALID_ARGUMENT) {
+			reply.set_error_code(116);
+		}
+
+		if (status.error_code() == CONN_ERR_CODE) {
+			if (Reconnect_To_Server() != 0) {
+				cerr << __LINE__ << ": " << "Unable to reconnect to the server"
+					<< endl << std::flush;
 			}
+		}
 	}
 
 	return move(reply);
@@ -392,6 +408,10 @@ Integer NFS_Client::Fsync_File(FileHandle &fh) {
 	if (!status.ok()) { 
 		cerr << __LINE__ << ": " <<  status.error_code() << ": " 
 		  << status.error_message() << std::endl << std::flush;
+		
+		if (status.error_code() == grpc::StatusCode::INVALID_ARGUMENT) {
+			reply.set_data(116);
+		}
 	}
 	return move(reply);
 }
@@ -506,6 +526,17 @@ int ClientFS::read(const char *path, char *buf, size_t size, off_t offset,
 	ReadResponse rd_resp = client_ptr->Read_File(fh_itr->second, offset, size);
 	// Copy the response to the bufferr
 	actual_read = rd_resp.actual_read_bytes();
+
+	if (rd_resp.error_code() == 116) {
+		cout << "Stale file handle has been detected in read" << endl;
+		// We have a stale file handle.
+		file_handle_map_.erase(fh_itr);
+		// Fetch the latest handle.
+		ClientFS::open(path, fi);
+		// Try reading again.
+		return ClientFS::read(path, buf, size, offset, fi);
+	}
+
 	if (actual_read < 0) {
 		return actual_read;
 	}
@@ -539,6 +570,16 @@ int ClientFS::write(const char *path, const char *buf, size_t size,
 	WriteResponse wresp = client_ptr->Write_File_Async(
 		file_handle_map_[string(path)], buf, offset, size);
 	#endif
+	
+	if (wresp.error_code() == 116) {
+		cout << "Stale file handle has been detected in write" << endl;
+		// We have a stale file handle.
+		file_handle_map_.erase(fh_itr);
+		// Fetch the latest handle.
+		ClientFS::open(path, fi);
+		// Try reading again.
+		return ClientFS::write(path, buf, size, offset, fi);
+	}
 	
 	return wresp.actual_bytes_written();
 }
@@ -659,7 +700,8 @@ int ClientFS::rename (const char *from_path, const char *to_path,
 
 // ============================================================================
 
-int ClientFS::fsync (const char *path, int, struct fuse_file_info *fi) {
+int ClientFS::fsync (const char *path, int isdatasync,	
+	struct fuse_file_info *fi) {
 	
 	#ifdef DBG_PRINTS_ENABLED
 	cout << "Fsync requested on file " << path << endl << std::flush;
@@ -675,6 +717,12 @@ int ClientFS::fsync (const char *path, int, struct fuse_file_info *fi) {
 	}
 	
 	Integer fsync_rc = client_ptr->Fsync_File(fh_itr->second);
+	if (fsync_rc.data() == 116) {
+		// delete the stale file handle.
+		file_handle_map_.erase(fh_itr);
+		ClientFS::open(path, fi);
+		return ClientFS::fsync(path, 0, fi);
+	}
 	return fsync_rc.data();
 }
 
@@ -684,19 +732,7 @@ int ClientFS::flush (const char *path, struct fuse_file_info *fi) {
 	#ifdef DBG_PRINTS_ENABLED
 	cout << "Flush requested" << endl << std::flush;
 	#endif
- // Get the file handle for the given path
- FileHandleMap::iterator fh_itr = file_handle_map_.find(string(path));
-
- // File Handle not present
- if (fh_itr == file_handle_map_.end()) {
- 		#ifdef DBG_PRINTS_ENABLED
-			cerr << "No file handle present for " << path << endl << std::flush;
-		#endif
-		return -1;
-	}
-	
-	Integer release_rc = client_ptr->Fsync_File(fh_itr->second);
-	return release_rc.data();
+	return ClientFS::fsync(path, 0, fi);
 }
 
 // ============================================================================
@@ -705,6 +741,6 @@ int ClientFS::release (const char *path, struct fuse_file_info *fi) {
 	#ifdef DBG_PRINTS_ENABLED
 	cout << "Release requested" << endl << std::flush;
 	#endif
-	return ClientFS::flush(path, fi);
+	return ClientFS::fsync(path, 0, fi);
 }
 // ============================================================================
