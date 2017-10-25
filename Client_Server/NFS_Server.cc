@@ -36,7 +36,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <aio.h> 
-
 #include <errno.h> 
 
 using grpc::Server;
@@ -59,10 +58,15 @@ using NFS_DFS::RenameRequest;
 
 using namespace std;
 
+// Enable the below macro to enable debug prints.
+// #define DBG_PRINTS_ENABLED 1
+
 typedef struct file_handle file_handle;
 typedef struct aiocb aiocb;
 
+#ifdef DBG_PRINTS_ENABLED
 void print_FileHandle(FileHandle& fh) {
+	
 	cout << "Path = " << fh.path() << "\tmount_id = " << fh.mount_id() << "\t";
 	const file_handle *fhp = reinterpret_cast<const file_handle *>
 					(fh.handle().c_str());
@@ -72,7 +76,7 @@ void print_FileHandle(FileHandle& fh) {
 	}
 	cout << "]" << endl << std::dec << std::flush;
 }
-
+#endif
 // ============================================================================
 
 string root_prefix;
@@ -236,8 +240,10 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 
   Status Write(ServerContext* context, const WriteRequest* request,
                   WriteResponse* reply) override {
-
+		
+		#ifdef DBG_PRINTS_ENABLED
 		cout << "Sync write on file " << request->fh().path() << endl;
+		#endif
 		FileHandle fh = request->fh();
 
 		const file_handle *fhp = reinterpret_cast<const file_handle *>
@@ -284,8 +290,10 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 
   Status Write_Async(ServerContext* context, const WriteRequest* request,
                   WriteResponse* reply) override {
-
+		
+		#ifdef DBG_PRINTS_ENABLED
 		cout << "Async Write on file " << request->fh().path() << endl;
+		#endif
 		FileHandle fh = request->fh();
 
 		const file_handle *fhp = reinterpret_cast<const file_handle *>
@@ -322,7 +330,9 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 		serveraio->aio_sigevent.sigev_notify = SIGEV_NONE;
 
 		int written = aio_write(serveraio);
-		cout << "Tried to Async Write.\nThe return code is : " << written << endl;
+		#ifdef DBG_PRINTS_ENABLED
+		cout << "Tried to Async Write. The return code is : " << written << endl;
+		#endif
 		if (written != 0) {
 			cerr << __LINE__ << ": " << "Unable to Write to file \"" <<	fh.path()
 					 << endl << std::flush;
@@ -403,8 +413,10 @@ Status Fsync(ServerContext* context, const FileHandle* fh, Integer* reply) {
 		mode_t mode = request->mode();
 		reply->set_data(-1);
 		
+		#ifdef DBG_PRINTS_ENABLED
 		cout << "File " << request->path() << " Created" << " with mode = "
 				<< std::hex << mode << std::dec << endl << std::flush;
+		#endif
 		string file_path = root_prefix + request->path();
 		int fd = creat(file_path.c_str(), mode);
 		if (fd < 0) {
