@@ -8,6 +8,9 @@
 
 using namespace std;
 
+// Enable the below macro to enable debug prints.
+// #define DBG_PRINTS_ENABLED 1
+
 // ============================================================================
 
 int Reconnect_To_Server() {
@@ -22,7 +25,7 @@ int Reconnect_To_Server() {
 		if (iterations++ >= RETRY_TIMEOUT) {
 			return -1;
 		}
-		cout << "Reconnect try " << iterations << endl;
+		cout << "Reconnect try iteration: " << iterations << endl;
 
 		this_thread::sleep_for(std::chrono::milliseconds(sleep_time_ms));
 		// Reinitialize client_ptr; i.e., reconnect to server
@@ -38,7 +41,9 @@ int Reconnect_To_Server() {
 		ClientFS::client_ptr->channel_->WaitForConnected(timeOut);
 		*/
 		status = ClientFS::client_ptr->Ping_Server();
+		#ifdef DBG_PRINTS_ENABLED
 		cout << "Error code = " << status.error_code() << endl;
+		#endif
 	} while(!status.ok());
 	//}	while(ClientFS::client_ptr->channel_->GetState(true) != GRPC_CHANNEL_READY);
 
@@ -50,6 +55,7 @@ int Reconnect_To_Server() {
 FileHandleMap ClientFS::file_handle_map_;
 unique_ptr<NFS_Client> ClientFS::client_ptr;
 
+#ifdef DBG_PRINTS_ENABLED
 void print_FileHandle(FileHandle& fh) {
   cout << "Path = " << fh.path() << "\tmount_id = " << fh.mount_id() << "\t";
 	const file_handle *fhp = reinterpret_cast<const file_handle *>
@@ -60,7 +66,7 @@ void print_FileHandle(FileHandle& fh) {
 	}
 	cout << "]" << endl << std::dec << std::flush;
 }
-
+#endif
 // ============================================================================
 
 FileHandle NFS_Client::Lookup_File(string&& path) {
@@ -130,7 +136,8 @@ ReadResponse NFS_Client::Read_File(FileHandle &fh, off_t offset, size_t size) {
 
 	Status status = stub_->Read(&context, read_req, &resp);
 	if (!status.ok()) {
-      std::cout << status.error_code() << ": " << status.error_message()
+     	cerr << __LINE__ << " : " << "Error in reading file: " << 
+				status.error_code() << ": " << status.error_message()
                 << std::endl << std::flush;
 			if (status.error_code() == CONN_ERR_CODE) {
 				if (Reconnect_To_Server() != 0) {
@@ -179,11 +186,12 @@ WriteResponse NFS_Client::Write_File(FileHandle& fh, const char *buf,
 	const file_handle *fhp =
 		reinterpret_cast<const file_handle *> (fh.handle().c_str());
 	request.mutable_fh()->set_handle(string((const char*)fhp,
-	// 	fh.handle().size()));
-	// cout << "Handle size = " << fh.handle().size() << endl;
 	fhp->handle_bytes + sizeof(file_handle)));
+
+	#ifdef DBG_PRINTS_ENABLED
 	cout << "Handle size = " << fhp->handle_bytes + sizeof(file_handle)
 		<< " = " << fhp->handle_bytes << " + " << sizeof(file_handle) << endl;
+	#endif
 
 	request.set_offset(offset);
 	request.set_size(size);
@@ -223,8 +231,11 @@ WriteResponse NFS_Client::Write_File_Async(FileHandle& fh, const char *buf,
 		reinterpret_cast<const file_handle *> (fh.handle().c_str());
 	request.mutable_fh()->set_handle(string((const char*)fhp,
 		fhp->handle_bytes + sizeof(file_handle)));
+
+	#ifdef DBG_PRINTS_ENABLED
 	cout << "Handle size = " << fhp->handle_bytes + sizeof(file_handle)
 		<< " = " << fhp->handle_bytes << " + " << sizeof(file_handle) << endl;
+	#endif
 
 	request.set_offset(offset);
 	request.set_size(size);
@@ -413,7 +424,9 @@ Status NFS_Client::Ping_Server() {
 int ClientFS::getattr(const char *path, struct stat *stbuf, struct fuse_file_info *)
 {
 	int res = 0;
-	cout << "getattr request for file = " << path << endl << std::flush ;
+	#ifdef DBG_PRINTS_ENABLED
+	cout << "getattr request for file = " << path << endl << std::flush;
+	#endif
 
 	memset(stbuf, 0, sizeof(struct stat));
 	Buffer buff = client_ptr->Get_File_Attributes(string(path));
@@ -432,7 +445,9 @@ int ClientFS::getattr(const char *path, struct stat *stbuf, struct fuse_file_inf
 int ClientFS::readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 										off_t, struct fuse_file_info *,
                      enum fuse_readdir_flags) {
+	#ifdef DBG_PRINTS_ENABLED
 	cout << "Open dir request for file = " << path << endl << std::flush ;
+	#endif
 
 	Buffer buff = client_ptr->Read_Directory(string(path));
 
@@ -451,7 +466,9 @@ int ClientFS::readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 
 int ClientFS::open(const char *path, struct fuse_file_info *fi)
 {
+	#ifdef DBG_PRINTS_ENABLED
 	cout << "Open request for file = " << path << endl << std::flush;
+	#endif
 
 	if (path == nullptr) {
 		return -EBADR;
@@ -472,7 +489,9 @@ int ClientFS::open(const char *path, struct fuse_file_info *fi)
 int ClientFS::read(const char *path, char *buf, size_t size, off_t offset,
 		              struct fuse_file_info *fi)
 {
+	#ifdef DBG_PRINTS_ENABLED
 	cout << "read request for file = " << path << endl << std::flush;
+	#endif
 	
 	int actual_read;
 	// Get the file handle for the given path
@@ -480,7 +499,7 @@ int ClientFS::read(const char *path, char *buf, size_t size, off_t offset,
 
 	// File Handle not present
 	if (fh_itr == file_handle_map_.end()) {
-		cout << "No file handle present for " << path;
+		cerr << __LINE__  << ": No file handle present for " << path;
 		return -1;
 	}
 
@@ -500,7 +519,9 @@ int ClientFS::read(const char *path, char *buf, size_t size, off_t offset,
 
 int ClientFS::write(const char *path, const char *buf, size_t size,
 								off_t offset, struct fuse_file_info *fi) {
+	#ifdef DBG_PRINTS_ENABLED
 	cout << "Write request for file = " << path << endl << std::flush;
+	#endif
 
 	if (path == nullptr) {
 		return -EBADR;
@@ -525,8 +546,11 @@ int ClientFS::write(const char *path, const char *buf, size_t size,
 // ============================================================================
 
 int ClientFS::create(const char * path, mode_t mode, struct fuse_file_info *fi) {
+
+	#ifdef DBG_PRINTS_ENABLED
 	cout << "File create request for file = " << path << " with mode = "
-	<< std::hex <<  mode << std::dec << endl << std::flush;
+		<< std::hex <<  mode << std::dec << endl << std::flush;
+	#endif
 	// Request server to create the file.
 	if (path == nullptr) {
 		return -EINVAL;
@@ -542,7 +566,9 @@ int ClientFS::create(const char * path, mode_t mode, struct fuse_file_info *fi) 
 // ============================================================================
 
 int ClientFS::unlink(const char *path) {
+	#ifdef DBG_PRINTS_ENABLED
 	cout << "File delete request for file = " << path << endl << std::flush;
+	#endif
 
 	if (path == nullptr) {
 		return -EINVAL;
@@ -564,8 +590,10 @@ int ClientFS::unlink(const char *path) {
 // ============================================================================
 
 int ClientFS::mkdir (const char *path, mode_t mode) {
+	#ifdef DBG_PRINTS_ENABLED
 	cout << "Directory creation requested for folder = " << path << endl
 			<< std::flush;
+	#endif
 
 	if (path == nullptr) {
 		return -EINVAL;
@@ -582,7 +610,9 @@ int ClientFS::mkdir (const char *path, mode_t mode) {
 // ============================================================================
 
 int ClientFS::rmdir (const char *path) {
+	#ifdef DBG_PRINTS_ENABLED
 	cout << "Directory delete request for " << path << endl << std::flush;
+	#endif
 	if (path == nullptr) {
 		return -EINVAL;
 	}
@@ -599,8 +629,10 @@ int ClientFS::rmdir (const char *path) {
 
 int ClientFS::rename (const char *from_path, const char *to_path,
 		unsigned int flags) {
+	#ifdef DBG_PRINTS_ENABLED
 	cout << "Rename requested from " << from_path << " to " << to_path
 			<< endl << std::flush;
+	#endif
 
 	if (from_path == nullptr || to_path == nullptr) {
 		return -EINVAL;
@@ -629,14 +661,16 @@ int ClientFS::rename (const char *from_path, const char *to_path,
 
 int ClientFS::fsync (const char *path, int, struct fuse_file_info *fi) {
 	
-	cout << "Fsync requested" << endl << std::flush;
+	#ifdef DBG_PRINTS_ENABLED
+	cout << "Fsync requested on file " << path << endl << std::flush;
+	#endif
 
 	// Get the file handle for the given path
 	FileHandleMap::iterator fh_itr = file_handle_map_.find(string(path));
 
 	// File Handle not present
 	if (fh_itr == file_handle_map_.end()) {
-	  cout << "No file handle present for " << path;
+	  cerr << __LINE__ << ": No file handle present for " << path;
 		return -1;
 	}
 	
@@ -647,14 +681,17 @@ int ClientFS::fsync (const char *path, int, struct fuse_file_info *fi) {
 // ============================================================================
 
 int ClientFS::flush (const char *path, struct fuse_file_info *fi) {
+	#ifdef DBG_PRINTS_ENABLED
 	cout << "Flush requested" << endl << std::flush;
-
+	#endif
  // Get the file handle for the given path
  FileHandleMap::iterator fh_itr = file_handle_map_.find(string(path));
 
  // File Handle not present
  if (fh_itr == file_handle_map_.end()) {
- 		cout << "No file handle present for " << path;
+ 		#ifdef DBG_PRINTS_ENABLED
+			cerr << "No file handle present for " << path << endl << std::flush;
+		#endif
 		return -1;
 	}
 	
@@ -665,7 +702,9 @@ int ClientFS::flush (const char *path, struct fuse_file_info *fi) {
 // ============================================================================
 
 int ClientFS::release (const char *path, struct fuse_file_info *fi) {
+	#ifdef DBG_PRINTS_ENABLED
 	cout << "Release requested" << endl << std::flush;
+	#endif
 	return ClientFS::flush(path, fi);
 }
 // ============================================================================
