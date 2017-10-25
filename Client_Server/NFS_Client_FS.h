@@ -60,6 +60,9 @@ class NFS_Client {
 	ReadResponse Read_File(FileHandle &fh, off_t offset, size_t size);
 	WriteResponse Write_File(FileHandle& fh, const char *,
 																	off_t offset, size_t size);
+	WriteResponse Write_File_Async(FileHandle& fh, const char *,
+																	off_t offset, size_t size);
+	Integer Fsync_File(FileHandle& fh);
 	Integer Create_File(const char *, mode_t mode);
 	Integer Delete_File(string&& path);
 	Integer Create_Directory(string&& path, mode_t mode);
@@ -122,6 +125,10 @@ public:
 
 	static int rename (const char *from_path, const char *to_path,
 		unsigned int);
+	
+	static int fsync (const char *, int, struct fuse_file_info *);
+	static int release (const char *, struct fuse_file_info *);
+	static int flush (const char *, struct fuse_file_info *);
 };
 
 #endif

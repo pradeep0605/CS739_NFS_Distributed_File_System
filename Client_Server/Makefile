@@ -9,6 +9,7 @@ CPPFLAGS += `pkg-config fuse3 --cflags protobuf grpc`
 CFLAGS = -Wall --std=c++14 `pkg-config fuse3 --cflags` -I..
 
 CXXFLAGS += -std=c++14
+LRTFLAGS = -lrt
 ifeq ($(SYSTEM),Darwin)
 LDFLAGS += -L/usr/local/lib `pkg-config --libs protobuf grpc++ grpc fuse3`\
            -lgrpc++_reflection\
@@ -47,7 +48,7 @@ $(OBJDIR)/%.o: %.cc
 	@rm -f $(OBJDIR)/$*.d.tmp
 
 NFS_Server: NFS.pb.o NFS.grpc.pb.o NFS_Server.o
-	$(CXX) $^ $(LDFLAGS) -o $@
+	$(CXX) $^ $(LDFLAGS) -o $@ $(LRTFLAGS)
 
 .PRECIOUS: %.grpc.pb.cc
 %.grpc.pb.cc: %.proto

@@ -209,6 +209,46 @@ WriteResponse NFS_Client::Write_File(FileHandle& fh, const char *buf,
 }
 
 // ============================================================================
+// Calls Asynchronous Write
+// ============================================================================
+
+WriteResponse NFS_Client::Write_File_Async(FileHandle& fh, const char *buf,
+												off_t offset, size_t size) {
+	WriteRequest request;
+	request.mutable_fh()->set_path(fh.path());
+	request.mutable_fh()->set_mount_id(fh.mount_id());
+	const file_handle *fhp =
+		reinterpret_cast<const file_handle *> (fh.handle().c_str());
+	request.mutable_fh()->set_handle(string((const char*)fhp,
+		fhp->handle_bytes + sizeof(file_handle)));
+	cout << "Handle size = " << fhp->handle_bytes + sizeof(file_handle)
+		<< " = " << fhp->handle_bytes << " + " << sizeof(file_handle) << endl;
+
+	request.set_offset(offset);
+	request.set_size(size);
+
+	request.mutable_buff()->set_data(buf, size);
+	request.mutable_buff()->set_size(size);
+	
+	WriteResponse reply;
+	ClientContext context;
+
+	Status status = stub_->Write_Async(&context, request, &reply);
+
+	if (!status.ok()) {
+		cerr << __LINE__ << ": " <<  status.error_code() << ": "
+			<< status.error_message() << std::endl << std::flush;
+			if (status.error_code() == CONN_ERR_CODE) {
+				if (Reconnect_To_Server() != 0) {
+					cerr << __LINE__ << ": " << "Unable to reconnect to the server"
+						<< endl << std::flush;
+				}
+			}
+	}
+
+	return move(reply);
+}
+// ============================================================================
 
 Integer NFS_Client::Create_File(const char *path, mode_t mode) {
 	FileCreateRequest request;
@@ -319,11 +359,26 @@ Integer NFS_Client::Rename_File(string&& from, string&& to, unsigned int flags) 
 	Integer reply;
 	ClientContext context;
 
-	Status status = stub_->RenameFile(&context, request, &reply);
+  Status status = stub_->RenameFile(&context, request, &reply);
 
 	if (!status.ok()) {
 		cerr << __LINE__ << ": " <<  status.error_code() << ": "
 				<< status.error_message() << std::endl << std::flush;
+	}
+	return move(reply);
+}
+
+// ============================================================================
+
+Integer NFS_Client::Fsync_File(FileHandle &fh) {
+	Integer reply;
+	ClientContext context;
+
+	Status status = stub_->Fsync(&context, fh, &reply);
+
+	if (!status.ok()) { 
+		cerr << __LINE__ << ": " <<  status.error_code() << ": " 
+		  << status.error_message() << std::endl << std::flush;
 	}
 	return move(reply);
 }
@@ -454,8 +509,10 @@ int ClientFS::write(const char *path, const char *buf, size_t size,
 		return -EBADR;
 	}
 	
-	WriteResponse wresp = client_ptr->Write_File(file_handle_map_[string(path)],
-		buf, offset, size);
+//	WriteResponse wresp = client_ptr->Write_File(file_handle_map_[string(path)],
+//		buf, offset, size);
+	WriteResponse wresp = client_ptr->Write_File_Async(
+		file_handle_map_[string(path)], buf, offset, size);
 	
 	return wresp.actual_bytes_written();
 }
@@ -560,6 +617,45 @@ int ClientFS::rename (const char *from_path, const char *to_path,
 
 // ============================================================================
 
+int ClientFS::fsync (const char *path, int, struct fuse_file_info *fi) {
+	
+	cout << "Fsync requested" << endl << std::flush;
 
+	// Get the file handle for the given path
+	FileHandleMap::iterator fh_itr = file_handle_map_.find(string(path));
 
+	// File Handle not present
+	if (fh_itr == file_handle_map_.end()) {
+	  cout << "No file handle present for " << path;
+		return -1;
+	}
+	
+	Integer fsync_rc = client_ptr->Fsync_File(fh_itr->second);
+	return fsync_rc.data();
+}
+
+// ============================================================================
+
+int ClientFS::flush (const char *path, struct fuse_file_info *fi) {
+	cout << "Flush requested" << endl << std::flush;
+
+ // Get the file handle for the given path
+ FileHandleMap::iterator fh_itr = file_handle_map_.find(string(path));
+
+ // File Handle not present
+ if (fh_itr == file_handle_map_.end()) {
+ 		cout << "No file handle present for " << path;
+		return -1;
+	}
+	
+	Integer release_rc = client_ptr->Fsync_File(fh_itr->second);
+	return release_rc.data();
+}
+
+// ============================================================================
+
+int ClientFS::release (const char *path, struct fuse_file_info *fi) {
+	cout << "Release requested" << endl << std::flush;
+	return ClientFS::flush(path, fi);
+}
 // ============================================================================

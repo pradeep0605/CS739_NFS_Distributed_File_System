@@ -26,6 +26,8 @@ service NFS_Server{
   rpc Lookup (LookupMessage) returns (FileHandle) {}
   rpc Read (ReadRequest) returns (ReadResponse) {}
   rpc Write (WriteRequest) returns (WriteResponse) {}
+  rpc Write_Async (WriteRequest) returns (WriteResponse) {}
+	rpc Fsync (FileHandle) returns (Integer);
   rpc Readdir (LookupMessage) returns (Buffer) {}
   rpc Getattr (LookupMessage) returns (Buffer) {}
   rpc CreateFile (FileCreateRequest) returns (Integer) {}

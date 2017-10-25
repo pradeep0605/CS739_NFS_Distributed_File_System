@@ -19,6 +19,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <cstring>
 
 #include <grpc++/grpc++.h>
 
@@ -34,6 +35,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <aio.h> 
 
 #include <errno.h> 
 
@@ -58,6 +60,7 @@ using NFS_DFS::RenameRequest;
 using namespace std;
 
 typedef struct file_handle file_handle;
+typedef struct aiocb aiocb;
 
 void print_FileHandle(FileHandle& fh) {
 	cout << "Path = " << fh.path() << "\tmount_id = " << fh.mount_id() << "\t";
@@ -263,6 +266,91 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 		}
     return Status::OK;
   }
+
+// ============================================================================
+// Asynchronous Write
+// ============================================================================
+
+  Status Write_Async(ServerContext* context, const WriteRequest* request,
+                  WriteResponse* reply) override {
+
+		cout << "Async Write request for file " << request->fh().path() << endl;
+		FileHandle fh = request->fh();
+
+		const file_handle *fhp = reinterpret_cast<const file_handle *>
+					(fh.handle().c_str());
+		FileOpenMap::iterator file_itr = file_open_map_.find(fh.path());
+		int mount_id = fh.mount_id();
+		reply->set_actual_bytes_written(0);
+		
+		int fd;
+		if (file_itr == file_open_map_.end()) {
+			int mount_fd = open_mount_path_by_id(mount_id);
+			fd = open_by_handle_at(mount_fd, (file_handle *) fhp, O_WRONLY);
+			if (fd < 0) {
+				cerr << __LINE__ << ": " << "Unable to open file \"" <<	fh.path()
+					   << "\" for writing\n" << endl << std::flush;
+				reply->set_actual_bytes_written(-1);
+				return Status::CANCELLED;
+			}
+		}
+
+		// Prepare the structure for Async IO
+		aiocb *serveraio = (aiocb* ) malloc(sizeof(aiocb));
+		char *dyn_buff = (char * ) malloc(request->size() + 1);
+		memcpy(dyn_buff, request->buff().data().c_str(), request->size());
+
+		memset(serveraio, 0, sizeof(aiocb));
+		
+		serveraio->aio_offset = request->offset();
+		serveraio->aio_fildes = fd;
+		serveraio->aio_nbytes = request->buff().size();
+		serveraio->aio_buf = (volatile void*) (dyn_buff);
+		serveraio->aio_sigevent.sigev_notify = SIGEV_NONE;
+
+//		if (lseek(fd, request->offset(), SEEK_SET) >= 0) {
+			// seeks success.
+			// int written = write(fd, request->buff().data().c_str(), request->size());
+			int written = aio_write(serveraio);
+			cout << "Tried to Async Write.\nThe return code is : "
+				<< written <<
+				endl;
+					 // << "\nERROR No. is " << errno << endl; 
+			if (written != 0) {
+				cerr << __LINE__ << ": " << "Unable to Write to file \"" <<	fh.path()
+					   << endl << std::flush;
+			}
+//			fsync(fd);
+			reply->set_actual_bytes_written(request->size());
+//		}
+    return Status::OK;
+  }
+
+// ============================================================================
+
+Status Fsync(ServerContext* context, const FileHandle* fh, Integer* reply) {
+	const file_handle *fhp = reinterpret_cast<const file_handle *> 
+		(fh->handle().c_str());
+	int mount_id = fh->mount_id();
+
+	cout << "Calling fsync in server" << endl;
+
+	int mount_fd = open_mount_path_by_id(mount_id);
+	int fd = open_by_handle_at(mount_fd, (file_handle *) fhp, O_WRONLY);
+	if (fd == -1) {
+		cerr << __LINE__ << " : " << "Unexpected result from open_by_handle_at()\n"
+		   << "ERROR No. is " << errno << endl;
+  	return Status::CANCELLED;
+	}
+
+	cout << "Done with fsync on server" << endl;
+	
+	int f_ret = fsync(fd);
+	reply->set_data(f_ret);
+	close(fd);
+	return Status::OK;
+}
+
 
 // ============================================================================
 
