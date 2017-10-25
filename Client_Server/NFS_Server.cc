@@ -360,6 +360,11 @@ class NFS_Server_Impl final : public NFS_Server::Service {
 		serveraio->aio_buf = (volatile void*) (dyn_buff);
 		serveraio->aio_sigevent.sigev_notify = SIGEV_NONE;
 
+		// Track all the allocated buffers in server
+		#if 0
+		file_write_buffer_map_[fh.path()].push_back(serveraio);
+		#endif
+
 		int written = aio_write(serveraio);
 		#ifdef DBG_PRINTS_ENABLED
 		cout << "Tried to Async Write. The return code is : " << written << endl;
@@ -403,6 +408,14 @@ Status Fsync(ServerContext* context, const FileHandle* fh, Integer* reply) {
 
 	int f_ret = fsync(fd);
 	reply->set_data(f_ret);
+
+	#if 0
+	for (auto entry : file_write_buffer_map_[fh->path()]) {
+		aiocb *serveraio  = entry;
+		free((void*) serveraio->aio_buf);
+		free(serveraio);
+	}
+	#endif
 
 	close(fd);
 	close(mount_fd);
@@ -564,6 +577,8 @@ Status Fsync(ServerContext* context, const FileHandle* fh, Integer* reply) {
 	private:
 	typedef unordered_map<string, int> FileOpenMap;
 	FileOpenMap file_open_map_; // keeps trak of files open for writing.
+	typedef unordered_map<string, vector<aiocb *>> FileWriteBufferMap;
+	FileWriteBufferMap file_write_buffer_map_;
 };
 
 // ============================================================================
