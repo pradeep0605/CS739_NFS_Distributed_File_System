@@ -1,0 +1,15 @@
+<html>
+  <head>
+    <title>Fooland</title>
+  </head>
+  <body>
+    <h1>Welcome to Fooland!</h1>
+		<h3>I am bar and I am here to <b> distribute</b> some comic relief to your
+		<b>systems</b></h3>
+		<ul>
+		{% for comic in comics %}
+			<li><a href="{{comic.path}}">{{ comic.name }}</a></li>
+		{% endfor %}
+		</ul>
+  </body>
+</html>
