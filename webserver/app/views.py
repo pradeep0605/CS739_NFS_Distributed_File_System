@@ -35,6 +35,26 @@ def index():
 		{
 			'name': 'Study for the exams',
 			'path': '../../static/hell.png'
+		},
+		{
+			'name': 'What state do we live in?',
+			'path': '../../static/denial.gif'
+		},
+		{
+			'name': 'What killed the Dinosaurs?',
+			'path': '../../static/How-the-dinosaurs-died.gif'
+		},
+		{
+			'name': 'Empathize with the Compilers',
+			'path': '../../static/compiler_complaint.png'
+		},
+		{
+			'name': 'Eat Your Greens',
+			'path': '../../static/eat_your_greens.png'
+		},
+		{
+			'name': 'Can a computer love?',
+			'path': '../../static/computer-love.png'
 		}
 
 	]
